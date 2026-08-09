@@ -15,13 +15,22 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const builtinRoot = join(root, 'apps', 'desktop', 'builtin-plugins');
-const pythonExe = join(root, 'apps', 'desktop', 'runtimes', 'python', 'python.exe');
-const nodeExe = join(root, 'apps', 'desktop', 'runtimes', 'nodejs', 'node.exe');
+const IS_WIN = process.platform === 'win32';
+
+// 内置运行时目录（apps/desktop/runtimes）在 Windows 下是 *.exe；macOS/Linux CI 上
+// 可能不存在该目录——此时回退到 PATH 上的 python3/python 与 node，避免全部误报失败。
+const runtimeDir = join(root, 'apps', 'desktop', 'runtimes');
+const pythonExe = IS_WIN
+  ? join(runtimeDir, 'python', 'python.exe')
+  : join(runtimeDir, 'python', 'bin', 'python3');
+const nodeExe = IS_WIN ? join(runtimeDir, 'nodejs', 'node.exe') : join(runtimeDir, 'nodejs', 'bin', 'node');
+const pythonCmd = existsSync(pythonExe) ? pythonExe : IS_WIN ? 'python.exe' : 'python3';
+const nodeCmd = existsSync(nodeExe) ? nodeExe : 'node';
 
 const REQUIRED_FIELDS = ['id', 'name', 'version', 'runtime_type', 'entry', 'capabilities'];
 const SUPPORTED_RUNTIMES = ['client', 'nodejs', 'python'];
@@ -36,34 +45,67 @@ function fail(message) {
 }
 
 function run(cmd, args, cwd) {
-  return spawnSync(cmd, args, { cwd, encoding: 'utf8' });
+  try {
+    return spawnSync(cmd, args, { cwd, encoding: 'utf8' });
+  } catch (e) {
+    // spawnSync 在命令不存在等场景抛异常（而非返回 error 对象），统一转成 status=1。
+    return { status: 1, stdout: '', stderr: String(e?.message ?? e) };
+  }
+}
+
+/** 解析 entry 并强制约束在插件目录内，防 `../` 越界读取宿主文件。 */
+function entryWithin(pluginDir, entry) {
+  const p = resolve(pluginDir, entry);
+  const base = resolve(pluginDir);
+  if (p !== base && !p.startsWith(base + sep)) {
+    fail(`${pluginDir}: 入口路径越出插件目录: ${entry}`);
+    return null;
+  }
+  return p;
 }
 
 function checkPython(pluginDir, entry) {
   checked += 1;
-  if (!existsSync(pythonExe)) return fail(`内置 Python 缺失: ${pythonExe}`);
-  const r = run(pythonExe, ['-m', 'py_compile', entry], pluginDir);
-  if (r.status !== 0) fail(`${pluginDir}: py_compile 失败 — ${r.stderr?.slice(0, 300)}`);
+  if (!existsSync(pythonExe)) {
+    fail(`内置 Python 缺失: ${pythonExe}`);
+    return;
+  }
+  const r = run(pythonCmd, ['-m', 'py_compile', entry], pluginDir);
+  if (r.error) fail(`${pluginDir}: 无法启动 ${pythonCmd} — ${String(r.error)}`);
+  else if (r.status !== 0) fail(`${pluginDir}: py_compile 失败 — ${r.stderr?.slice(0, 300)}`);
 }
 
 function checkNode(pluginDir, entry) {
   checked += 1;
-  if (!existsSync(nodeExe)) return fail(`内置 Node 缺失: ${nodeExe}`);
-  const r = run(nodeExe, ['--check', entry], pluginDir);
-  if (r.status !== 0) fail(`${pluginDir}: node --check 失败 — ${r.stderr?.slice(0, 300)}`);
+  if (!existsSync(nodeExe)) {
+    fail(`内置 Node 缺失: ${nodeExe}`);
+    return;
+  }
+  const r = run(nodeCmd, ['--check', entry], pluginDir);
+  if (r.error) fail(`${pluginDir}: 无法启动 ${nodeCmd} — ${String(r.error)}`);
+  else if (r.status !== 0) fail(`${pluginDir}: node --check 失败 — ${r.stderr?.slice(0, 300)}`);
 }
 
 function checkClient(pluginDir, entry) {
   checked += 1;
-  const path = join(pluginDir, entry);
-  const html = readFileSync(path, 'utf8');
+  const path = entryWithin(pluginDir, entry);
+  if (!path) return;
+  let html = '';
+  try {
+    html = readFileSync(path, 'utf8');
+  } catch (e) {
+    fail(`${pluginDir}: ${entry} 读取失败 — ${e.message}`);
+    return;
+  }
   if (!/<html[\s>]/i.test(html) && !/<!doctype html/i.test(html)) {
     fail(`${pluginDir}: ${entry} 不是合法 HTML`);
   }
 }
 
 function checkErrorFallback(pluginDir, entry, runtime) {
-  const content = readFileSync(join(pluginDir, entry), 'utf8');
+  const path = entryWithin(pluginDir, entry);
+  if (!path) return;
+  const content = readFileSync(path, 'utf8');
   if (runtime === 'python') {
     if (!/except\s*(.+)?\s*:/.test(content)) fail(`${pluginDir}: LLM 调用缺少 except 兜底`);
   } else if (!/catch\s*\(/.test(content)) {
@@ -108,7 +150,9 @@ function main() {
     const manifest = checkManifest(pluginDir, dir.name);
     if (!manifest) continue;
 
-    const entryPath = join(pluginDir, manifest.entry);
+    // 入口必须落在插件目录内（防 ../ 越权读取宿主文件内容做语法检查）
+    const entryPath = entryWithin(pluginDir, manifest.entry);
+    if (!entryPath) continue;
     if (!existsSync(entryPath)) {
       fail(`${dir.name}: 入口不存在 ${manifest.entry}`);
       continue;

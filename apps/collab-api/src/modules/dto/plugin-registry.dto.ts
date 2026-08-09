@@ -1,8 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -122,4 +124,27 @@ export class PluginLifecycleReasonDto {
   @IsString()
   @MaxLength(500)
   reason?: string;
+}
+
+// —— 适配报告暂存 / 适配干跑端点 ——
+// 此前这里直接写内联类型 `{ report?: unknown }`：全局 ValidationPipe 对无装饰器的
+// 纯对象不生效，任意字段都能穿透（XSEC-01 同类问题）。补成具名 DTO 让 whitelist
+// + forbidNonWhitelisted 真正施加到 body 上。
+
+export class StageAdaptationReportDto {
+  @ApiPropertyOptional({ description: '完整 AdaptationReport 对象（结构由服务端容忍解析）' })
+  @IsOptional()
+  @IsObject()
+  report?: unknown;
+}
+
+export class AdaptDryRunDto {
+  @ApiProperty({ description: '待拟合的插件 manifest（未知结构，仅顶层校验）' })
+  @IsObject()
+  manifest!: Record<string, unknown>;
+
+  @ApiPropertyOptional({ description: 'AI 策略闸门所需的源码文件清单（可选）' })
+  @IsOptional()
+  @IsArray()
+  files?: unknown[];
 }

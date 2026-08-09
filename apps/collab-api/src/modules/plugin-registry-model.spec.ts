@@ -26,8 +26,11 @@ describe('plugin registry model helpers', () => {
     });
   });
 
-  it('accepts the ADAPT ingest channel used by the adaptation pipeline', () => {
-    expect(normalizeReleaseSource({ ingestChannel: 'adapt' }).ingestChannel).toBe('ADAPT');
+  it('rejects a self-declared ADAPT channel when no report is redeemed', () => {
+    // 客户端不能仅凭 headers 自报 ADAPT 接入通道：没有兑付报告时直接拒绝（防伪造来源标记）。
+    expect(() => normalizeReleaseSource({ ingestChannel: 'adapt' })).toThrow(
+      /不能自报 ADAPT/
+    );
   });
 
   it('keeps a redeemed adaptation report and marks the release as ADAPT-ingested', () => {

@@ -116,7 +116,7 @@ pub fn enforce_signature_gate(
         .get("draft")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    if resolve_draft_exemption(plugins_root, plugin_dir, self_draft, &bytes)? {
+    if resolve_draft_exemption(plugins_root, plugin_dir, self_draft, &bytes, require_signed)? {
         return Ok(());
     }
     let status = verify_plugin_signature_at_dir(plugins_root, plugin_dir)?;
@@ -189,53 +189,78 @@ struct ManifestAttestation {
 ///
 /// 用路径摘要而非 plugin_id 作键：门禁同时服务 plugins_root 下的目录与 installed/releases
 /// 下的发行版目录，只有绝对路径是共同的稳定标识；摘要同时规避了路径字符转义问题。
+/// 大小写折叠只在 Windows 生效（NTFS 大小写不敏感，canonicalize 已归一实际磁盘大小写）——
+/// 在 Linux/macOS 大小写敏感卷上折叠会让 `/plugins/Foo` 与 `/plugins/foo`（sanitize_plugin_id
+/// 允许大小写字母）共享同一基线，未签名变体可借此继承草稿豁免（P1-3 修复）。
 fn attestation_path(plugins_root: &Path, plugin_dir: &Path) -> PathBuf {
     let canonical = fs::canonicalize(plugin_dir).unwrap_or_else(|_| plugin_dir.to_path_buf());
-    let key = crate::plugin_artifact_v4::sha256_bytes(
-        canonical.to_string_lossy().to_lowercase().as_bytes(),
-    );
+    let mut key_text = canonical.to_string_lossy().to_string();
+    #[cfg(windows)]
+    {
+        key_text.make_ascii_lowercase();
+    }
+    let key = crate::plugin_artifact_v4::sha256_bytes(key_text.as_bytes());
     plugins_root
         .join(".lingfang")
         .join("attest")
         .join(format!("{}.json", &key[..32]))
 }
 
-fn load_attestation(plugins_root: &Path, plugin_dir: &Path) -> Option<ManifestAttestation> {
-    let raw = fs::read_to_string(attestation_path(plugins_root, plugin_dir)).ok()?;
-    serde_json::from_str(&raw).ok()
+/// 读取基线证明。区分三态：
+/// - `Ok(None)`：文件不存在（首见 → 走 TOFU 立基线）；
+/// - `Err`：存在但不可读/不可解析——此时**不得**按「首见」重立基线
+///   （正式插件可因此被降级为草稿并获得签名豁免，fail-open），一律 fail-closed 拒绝。
+fn load_attestation(
+    plugins_root: &Path,
+    plugin_dir: &Path,
+) -> Result<Option<ManifestAttestation>, String> {
+    let path = attestation_path(plugins_root, plugin_dir);
+    match fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str(&raw)
+            .map(Some)
+            .map_err(|e| format!("插件基线证明文件损坏（fail-closed 拒绝启动）：{}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!(
+            "读取插件基线证明失败（fail-closed 拒绝启动）：{}: {e}",
+            path.display()
+        )),
+    }
 }
 
-/// 写入基线证明（tmp+rename 原子替换）。目录创建失败等 IO 错误直接上抛：
-/// 基线写不进去却放行，等于门禁形同虚设。
+/// 写入基线证明（原子替换；复用 plugin_store::write_json 的 pid+纳秒唯一 tmp + rename 策略）。
+/// 目录创建失败等 IO 错误直接上抛：基线写不进去却放行，等于门禁形同虚设。
 fn save_attestation(
     plugins_root: &Path,
     plugin_dir: &Path,
     record: &ManifestAttestation,
 ) -> Result<(), String> {
     let path = attestation_path(plugins_root, plugin_dir);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建插件证明目录失败：{e}"))?;
-    }
-    let body = serde_json::to_vec(record).map_err(|e| format!("序列化插件证明失败：{e}"))?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, &body).map_err(|e| format!("写入插件证明失败：{e}"))?;
-    fs::rename(&tmp, &path).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("提交插件证明失败：{e}")
-    })
+    crate::plugin_store::write_json(&path, record)
 }
 
 /// 判定草稿豁免是否成立（唯一入口，见本节顶部注释）。
+///
+/// `require_signed=true`（Team/Marketplace 远端链路）：**首见插件也不接受自述草稿豁免**——
+/// 签名门禁只应被 Local/Builtin 安装的首见草稿绕过；带 `draft:true` 的远端包本身就是绕过
+/// 签名的攻击面（与 staged 门禁的自述目标一致），详见 P1-3 修复记录。
 fn resolve_draft_exemption(
     plugins_root: &Path,
     plugin_dir: &Path,
     self_draft: bool,
     manifest_bytes: &[u8],
+    require_signed: bool,
 ) -> Result<bool, String> {
     let digest = crate::plugin_artifact_v4::sha256_bytes(manifest_bytes);
-    match load_attestation(plugins_root, plugin_dir) {
-        // 首见：以当前状态立基线（TOFU）。既有 AI 草稿/本地插件工作流零行为变更。
+    match load_attestation(plugins_root, plugin_dir)? {
+        // 首见：以当前状态立基线（TOFU）。既有 AI 草稿/本地插件工作流零行为变更；
+        // 但远端（require_signed）链路的首见自述草稿不豁免——必须过签名。
         None => {
+            if self_draft && require_signed {
+                return Err(
+                    "带 draft:true 的远端插件未通过签名校验（fail-closed 拒绝首见草稿豁免）"
+                        .to_string(),
+                );
+            }
             save_attestation(
                 plugins_root,
                 plugin_dir,
@@ -441,13 +466,25 @@ mod tests {
         assert!(error.contains("manifest.sig"));
     }
 
+    /// Local/Builtin 首见草稿：require_signed=false 时无需签名即可立草稿基线（既有工作流）。
     #[test]
-    fn enforce_gate_allows_draft_plugin_without_signature() {
+    fn enforce_gate_allows_local_draft_without_signature() {
         let store = temp_store("gate-draft");
         let dir = store.plugin_dir("draft-pkg").unwrap();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("manifest.json"), r#"{"id":"draft-pkg","draft":true}"#).unwrap();
-        enforce_signature_gate(&store.plugins_root(), &dir, true).unwrap();
+        enforce_signature_gate(&store.plugins_root(), &dir, false).unwrap();
+    }
+
+    /// 远端（require_signed=true）首见草稿不得豁免——带 draft:true 的远端包必须过签名。
+    #[test]
+    fn remote_first_seen_draft_requires_signature() {
+        let store = temp_store("gate-remote-draft");
+        let dir = store.plugin_dir("remote-draft").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), r#"{"id":"remote-draft","draft":true}"#).unwrap();
+        let error = enforce_signature_gate(&store.plugins_root(), &dir, true).unwrap_err();
+        assert!(error.contains("首见草稿"), "实际错误：{error}");
     }
 
     #[test]
@@ -483,14 +520,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let manifest = dir.join("manifest.json");
         std::fs::write(&manifest, r#"{"id":"draft-edit","draft":true}"#).unwrap();
-        enforce_signature_gate(&store.plugins_root(), &dir, true).unwrap();
+        enforce_signature_gate(&store.plugins_root(), &dir, false).unwrap();
         // AI/用户继续编辑草稿 manifest → 摘要变化不应导致拦截。
         std::fs::write(
             &manifest,
             r#"{"id":"draft-edit","draft":true,"title":"改过名"}"#,
         )
         .unwrap();
-        enforce_signature_gate(&store.plugins_root(), &dir, true).unwrap();
+        enforce_signature_gate(&store.plugins_root(), &dir, false).unwrap();
     }
 
     /// 授权通路：set_draft_flag(false) 发布后基线转正，此后自述 draft 再也豁免不了。
@@ -500,7 +537,7 @@ mod tests {
         let dir = store.plugin_dir("pub-pkg").unwrap();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("manifest.json"), r#"{"id":"pub-pkg","draft":true}"#).unwrap();
-        enforce_signature_gate(&store.plugins_root(), &dir, true).unwrap();
+        enforce_signature_gate(&store.plugins_root(), &dir, false).unwrap();
         // 发布：命令层授权变更（写 manifest + 刷新基线）。
         store.set_draft_flag("pub-pkg", false).unwrap();
         enforce_signature_gate(&store.plugins_root(), &dir, false).unwrap();

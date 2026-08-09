@@ -128,7 +128,7 @@ describe('plugin AI SDK', () => {
       task_id: 'rbflow-task-1',
       call_log_id: 'vlog-1',
       charged: true,
-      credits: 5,
+      credits: 500, // 桥返回整数分，SDK ÷100 还原为灵石
     });
     (globalThis as TestGlobal).__lingfangInvoke = bridge;
 
@@ -162,7 +162,7 @@ describe('plugin AI SDK', () => {
           task_id: 'rbflow-task-2',
           call_log_id: 'vlog-2',
           charged: true,
-          credits: 3,
+          credits: 300, // 桥返回整数分，SDK ÷100 还原为灵石
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       )

@@ -12,15 +12,18 @@ import {
   Res,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { ensureRequestId, requireUser } from '../common';
 import { RequirePermission } from './auth.decorators';
 import {
+  AdaptDryRunDto,
   AdminPluginPackageListQueryDto,
   AdminPluginPageQueryDto,
   AdminPluginReasonDto,
   PluginLifecycleReasonDto,
   PluginRuntimeAccessDto,
+  StageAdaptationReportDto,
   UpdateMarketplaceListingStatusDto,
   UpdatePluginPackageStatusDto,
   UpdatePluginReleaseStatusDto,
@@ -73,17 +76,19 @@ export class PluginRegistryController {
   @ApiOperation({
     summary: '暂存适配报告换取 reportId（HTTP 头装不下含中文的完整 AdaptationReport）',
   })
-  stageAdaptationReport(@Req() req: Request, @Body() body: { report?: unknown }) {
+  stageAdaptationReport(@Req() req: Request, @Body() body: StageAdaptationReportDto) {
     return this.registry.stageAdaptationReport(requireUser(req).id, body?.report);
   }
 
+  // 干跑会做 AI 策略闸门扫描（成本/CPU 远高于普通查询），限速防脚本滥用。
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @RequirePermission('team.plugin.upload')
   @Post('plugin-registry/adapt')
   @ApiOperation({
     summary: '适配检验改造干跑：仅 manifest 符号级校验 + AI 策略闸门（不执行插件、不装依赖）',
   })
-  adaptDryRun(@Body() body: { manifest: unknown; files?: PluginAiPolicyFile[] }) {
-    return this.registry.dryRunAdaptation(body.manifest, body.files ?? []);
+  adaptDryRun(@Body() body: AdaptDryRunDto) {
+    return this.registry.dryRunAdaptation(body.manifest, (body.files ?? []) as PluginAiPolicyFile[]);
   }
 
   @RequirePermission('team.plugin.list')

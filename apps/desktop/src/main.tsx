@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ThemeProvider } from 'next-themes';
 import App from '@/App';
-import { initApiBase, initAuthToken } from '@/lib/api';
+import { initApiBase, initAuthToken, tauriInvoke } from '@/lib/api';
 import '@/index.css';
 
 // DESK-SHELL-05 修复：渲染树顶层 ErrorBoundary。
@@ -26,9 +26,17 @@ class RootErrorBoundary extends React.Component<
   }
 
   handleReset = () => {
-    // P1-1：会话已移出 localStorage（仅存内存 + Rust session.json）。
-    // 重置即清内存态并重载；Rust session.json 由登出流程的 persist_auth_token(null) 清理。
-    window.location.reload();
+    // P1-1 修复：此前只 reload——内存态虽清，但 Rust 侧 session.json 的持久令牌副本
+    // 仍在，下次启动 restoreTokenFromHost 会原样拉回，等于没重置。
+    // 先显式把 Rust 副本清成 null，成功后再重载（失败也重载：非桌面环境静默降级）。
+    void (async () => {
+      try {
+        await tauriInvoke<null>('persist_auth_token', { token: null });
+      } catch {
+        /* 网页预览 / 旧壳无命令：忽略 */
+      }
+      window.location.reload();
+    })();
   };
 
   render() {

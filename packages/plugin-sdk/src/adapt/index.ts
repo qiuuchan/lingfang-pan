@@ -10,9 +10,9 @@
 //
 // 产物 AdaptationReport 可由桌面端 UI 展示，或随发布请求上送服务端落库。
 
-import { cpSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import type { AdaptationIssue, AdaptationReport, FixApplied, RunEvidence } from './report.ts';
 import { buildReport } from './report.ts';
 import { validateWorkspace } from './validate.ts';
@@ -51,8 +51,10 @@ function copyToTemp(src: string, destParent: string): string {
   cpSync(src, dest, {
     recursive: true,
     filter: (p) => {
-      const base = p.split(/[\\/]/).pop() ?? '';
-      return !EXCLUDE_COPY.has(base);
+      // 按相对路径逐段排除：仅比较 basename 时，子目录里的 node_modules/venv/data
+      // 会漏带进工作区（既膨胀打包体积，也可能把用户私有数据打进临时目录）。
+      const rel = relative(src, p).split(/[\\/]/);
+      return !rel.some((seg) => EXCLUDE_COPY.has(seg));
     },
   });
   return dest;
@@ -77,10 +79,14 @@ export async function runAdaptation(opts: AdaptOptions): Promise<AdaptResult> {
   let manifest: Record<string, unknown> | null = null;
   if (ws.hasManifest()) {
     manifest = ws.readManifest();
-    const applied = applyTransforms(ws, manifest);
-    if (applied.length > 0) {
-      ws.writeManifest(manifest);
-      fixes.push(...applied);
+    // readManifest 对损坏 JSON 返回 null：此时跳过改造（校验环节已给出
+    // manifest_invalid 需人工问题），不能拿空对象去跑 transform。
+    if (manifest) {
+      const applied = applyTransforms(ws, manifest);
+      if (applied.length > 0) {
+        ws.writeManifest(manifest);
+        fixes.push(...applied);
+      }
     }
   }
 
@@ -104,8 +110,11 @@ export async function runAdaptation(opts: AdaptOptions): Promise<AdaptResult> {
   if (opts.repack && manifest) {
     const { packWorkspace } = await import('../cli/util/archive.ts');
     const packed = await packWorkspace({ workspaceDir, manifest: manifest as never });
-    const outDir = opts.outDir ?? src;
-    artifactPath = join(outDir, packed.suggestedFilename);
+    // suggestedFilename 来自（可能不可信的）manifest.id，先取 basename 再拼接，
+    // 防止 `../x.lfplugin` 之类的 id 把产物写穿输出目录。
+    const outDir = (opts.outDir ?? workspaceDir) as string;
+    mkdirSync(outDir, { recursive: true });
+    artifactPath = join(outDir, basename(packed.suggestedFilename));
     writeFileSync(artifactPath, packed.buffer);
   }
 

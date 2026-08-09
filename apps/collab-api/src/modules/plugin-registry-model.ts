@@ -101,12 +101,20 @@ export function normalizeReleaseSource(
     'API',
     '插件接入通道'
   );
+  // 适配通道标记只能来自「兑付到报告」的证据，客户端不能自报 ADAPT：
+  // 否则任何人 headers 里写 adapt 就能把发行版打入适配来源（审核/计费都按它归类）。
+  let ingestChannel: PluginIngestChannel;
+  if (adaptation.status !== 'NOT_RUN') {
+    ingestChannel = 'ADAPT';
+  } else if (declaredChannel === 'ADAPT') {
+    throw badRequest('客户端不能自报 ADAPT 接入通道：请先暂存适配报告再携带 x-adaptation-report-id');
+  } else {
+    ingestChannel = declaredChannel;
+  }
   return {
     sourceKind: enumValue(headers.sourceKind, RELEASE_SOURCE_KINDS, 'UNKNOWN', '插件来源类型'),
     sourceLabel: decodeSourceLabel(headers.sourceLabelBase64),
-    // 兑付到「跑过」的适配报告即视为走适配流水线上传，覆盖调用方声明的通道。
-    // status 在暂存时已过白名单，所以伪造报告最多退化成 NOT_RUN，拿不到 ADAPT 标记。
-    ingestChannel: adaptation.status === 'NOT_RUN' ? declaredChannel : 'ADAPT',
+    ingestChannel,
     adaptationReport: adaptation.report,
     adaptationStatus: adaptation.status,
   };

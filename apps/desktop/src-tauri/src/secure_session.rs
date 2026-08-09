@@ -102,17 +102,21 @@ mod imp {
                 std::io::Error::last_os_error()
             ));
         }
-        let out =
-            unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) };
-        let s = String::from_utf8(out.to_vec()).map_err(|e| format!("解密结果非 UTF-8：{e}"))?;
+        // 先把密文拷到自有缓冲区，再释放 LocalAlloc 分配的内存，保证任何后续失败路径都不泄漏。
+        let out_vec =
+            unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
         unsafe {
             let _ = LocalFree(out_blob.pbData as HLOCAL);
         }
+        let s = String::from_utf8(out_vec).map_err(|e| format!("解密结果非 UTF-8：{e}"))?;
         Ok(s)
     }
 
-    /// 取当前进程 token 所属用户 SID（用于 DACL 仅授权当前用户）。
-    unsafe fn current_user_sid() -> Result<PSID, String> {
+    /// 取当前进程 token 所属用户 SID，**拷贝到自有缓冲区后返回**（用于 DACL 仅授权当前用户）。
+    ///
+    /// 不得把 `GetTokenInformation` 输出的裸 `PSID` 传出去：它指向本函数的局部 `buf`，
+    /// 返回即悬垂——`harden_file_acl` 解引用会构成 use-after-free（P1-3 Step 1.5 修复）。
+    unsafe fn current_user_sid() -> Result<Vec<u8>, String> {
         let mut token: HANDLE = std::ptr::null_mut();
         if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
             return Err(format!(
@@ -120,7 +124,8 @@ mod imp {
                 std::io::Error::last_os_error()
             ));
         }
-        // 第一次调用取所需缓冲区长度。
+        // 第一次调用取所需缓冲区长度。返回 0 在此处是预期的（ERROR_INSUFFICIENT_BUFFER），
+        // 但若查询本身失败、needed 仍为 0，直接报出，避免后面用 0 长度缓冲区掩盖真实原因。
         let mut needed: u32 = 0;
         GetTokenInformation(
             token,
@@ -129,6 +134,13 @@ mod imp {
             0,
             &mut needed,
         );
+        if needed == 0 {
+            let _ = CloseHandle(token);
+            return Err(format!(
+                "GetTokenInformation 查询缓冲区大小失败：{}",
+                std::io::Error::last_os_error()
+            ));
+        }
         let mut buf = vec![0u8; needed as usize];
         if GetTokenInformation(
             token,
@@ -144,20 +156,32 @@ mod imp {
                 std::io::Error::last_os_error()
             ));
         }
-        let token_user = buf.as_ptr() as *const TOKEN_USER;
-        let sid = (*token_user).User.Sid;
+        // SAFETY: buf 由 GetTokenInformation 填充，内容为 TOKEN_USER + 紧随其后的可变长度 SID；
+        // Vec<u8> 只保证 1 字节对齐，因此用 read_unaligned 读结构体头。
+        let token_user = std::ptr::read_unaligned(buf.as_ptr() as *const TOKEN_USER);
+        let sid = token_user.User.Sid;
         let _ = CloseHandle(token);
         if sid.is_null() {
             return Err("TokenUser.Sid 为空".to_string());
         }
-        Ok(sid)
+        // SID 结构位于 buf 内部，buf 在函数返回即 Drop——必须复制到自有缓冲区。
+        let sid_len = GetLengthSid(sid);
+        let mut owned = vec![0u8; sid_len as usize];
+        if CopySid(sid_len, owned.as_mut_ptr() as *mut _, sid) == 0 {
+            return Err(format!(
+                "CopySid 失败：{}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(owned)
     }
 
     /// 把文件 DACL 设为仅当前用户完全控制且不可继承。
     /// best-effort：任何步骤失败都返回 Err，由调用方决定是否记录后继续。
     pub(crate) fn harden_file_acl(path: &Path) -> Result<(), String> {
         unsafe {
-            let sid = current_user_sid()?;
+            let sid_buf = current_user_sid()?;
+            let sid = sid_buf.as_ptr() as PSID;
             let sid_len = GetLengthSid(sid);
 
             // ACL 缓冲区大小：ACL 头 + 一条 ACCESS_ALLOWED_ACE + SID（ACE 内含 SID，

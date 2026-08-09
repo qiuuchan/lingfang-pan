@@ -236,7 +236,14 @@ impl GuardedCommand {
             use std::os::unix::process::CommandExt;
             unsafe {
                 command.pre_exec(|| {
-                    super::tree::libc_setsid();
+                    // setsid 失败时子进程会留在宿主进程组/session 里——stop 时 kill -- -{pid}
+                    // 打不到整棵进程树，隔离承诺被悄悄破坏。pre_exec 在 fork 之后、exec 之前
+                    // 于子进程内运行，返回 Err 能使 spawn() 整体失败，而不是放行未隔离的进程。
+                    // 注：第一次调用若已是进程组组长，setsid 会返回 -1（EPERM）；子进程继承
+                    // 自 fork 的进程组与父进程相同，正常路径不会撞上组长身份。
+                    if super::tree::libc_setsid() == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
                     Ok(())
                 });
             }

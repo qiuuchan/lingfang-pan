@@ -35,13 +35,11 @@ pub(crate) fn kill_child_tree(child: &Child) {
 // 已被 `guarded_spawn::GuardedCommand` 统一吸收（P1-3 Step 0），此处不再保留。
 
 #[cfg(unix)]
-pub(super) fn libc_setsid() {
+pub(super) fn libc_setsid() -> i32 {
     extern "C" {
         fn setsid() -> i32;
     }
-    unsafe {
-        let _ = setsid();
-    }
+    unsafe { setsid() }
 }
 
 #[cfg(windows)]

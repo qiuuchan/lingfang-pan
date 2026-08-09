@@ -28,10 +28,15 @@ export type AdaptationStatus = z.infer<typeof AdaptationStatus>;
  */
 export const PLUGIN_ADAPTATION_REPORT_MAX_BYTES = 512 * 1024;
 
-/** 适配报告原文（AdaptationReport JSON），仅在详情/审核面暴露。 */
+/** 适配报告原文（AdaptationReport JSON），仅在详情/审核面暴露。
+ *  z.string().max() 数的是 UTF-16 字符数，不是字节数——中文内容（报告里满篇中文
+ *  错误消息）3 字节/字会让真实体积超 512 KiB 却仍过闸，服务端才按字节拒。这里
+ *  refine 成字节级检查与 PLUGIN_ADAPTATION_REPORT_MAX_BYTES 真正对齐。 */
 export const RunEvidence = z
   .string()
-  .max(PLUGIN_ADAPTATION_REPORT_MAX_BYTES)
+  .refine((s) => new TextEncoder().encode(s).byteLength <= PLUGIN_ADAPTATION_REPORT_MAX_BYTES, {
+    message: 'runEvidence 超过 512 KiB（按 UTF-8 字节计）',
+  })
   .nullable()
   .default(null);
 

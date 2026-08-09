@@ -35,13 +35,48 @@ interface SpawnResult {
   stderr: string;
 }
 
+/** 杀掉子进程及其整棵后代进程树：
+ *  Windows 用 taskkill /T 按进程树递归；
+ *  POSIX 用进程组（spawn 时 detached:true 使子进程成为组长）向 -pid 发 SIGKILL，兜底再杀 pid 本身。
+ *  外围兜底：树杀死失败时，最后的机会是 killTimer 的二次 SIGKILL。 */
+async function killTree(child: import('node:child_process').ChildProcess): Promise<void> {
+  const pid = child.pid;
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    try {
+      const { spawn } = await import('node:child_process');
+      await new Promise<void>((resolve) => {
+        const k = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+        k.on('exit', () => resolve());
+        k.on('error', () => resolve());
+      });
+      return;
+    } catch {
+      // fall through 到直接 kill
+    }
+  }
+  try {
+    process.kill(-pid, 'SIGKILL');
+    return;
+  } catch {
+    // 非组长（POSIX spawn 未 detached）或已退出：退而求其次只杀本进程
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {}
+}
+
 async function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string>; timeoutMs?: number }): Promise<SpawnResult> {
   // 动态 import，避免浏览器打包静态引用 node:child_process
   const { spawn } = await import('node:child_process');
+  // ⚠️ 不把 process.env 全量注入子进程：宿主环境可能携带 CI token / 数据库凭据等机密，
+  // 子进程只应拿到调用方显式构造的白名单环境（见 sandboxedEnv）。
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
       cwd: opts.cwd,
-      env: { ...process.env, ...(opts.env ?? {}) },
+      env: opts.env ?? {},
+      // POSIX 下 detached 让子进程成为会话组长，便于按整棵进程树清理
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -52,7 +87,7 @@ async function run(cmd: string, args: string[], opts: { cwd?: string; env?: Reco
     const timer = opts.timeoutMs
       ? setTimeout(() => {
           timedOut = true;
-          child.kill('SIGKILL');
+          void killTree(child);
         }, opts.timeoutMs)
       : null;
     child.on('exit', (code) => {
@@ -75,28 +110,31 @@ function nodeExeFor(opts: RuntimeCheckOptions): string {
   return process.platform === 'win32' ? 'node.exe' : 'node';
 }
 
-function minimalEnv(extra: Record<string, string> = {}): Record<string, string> {
-  const env: Record<string, string> = { ...extra };
-  env.LANG = 'zh_CN.UTF-8';
+/** 构建子进程白名单环境：绝不全量继承宿主 process.env（宿主可能有 CI token / DB 凭据等机密）。
+ *  只给运行环境所需的几个变量 + 显式注入的桥占位符。 */
+function sandboxedEnv(extra: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of ['PATH', 'HOME', 'USERPROFILE', 'SYSTEMROOT', 'TMP', 'TEMP', 'ComSpec', 'SystemDrive', 'PWD', 'LOGNAME', 'USER']) {
+    const v = process.env[key];
+    if (v !== undefined) env[key] = v;
+  }
+  // Python 解释器按 Unicode 运行需要 locale 与编码变量
+  env.LANG = 'C.UTF-8';
   env.PYTHONIOENCODING = 'utf-8';
-  env.HTTP_PROXY = '';
-  env.HTTPS_PROXY = '';
-  env.http_proxy = '';
-  env.https_proxy = '';
   env.NO_PROXY = '*';
-  return env;
+  return { ...env, ...extra };
 }
 
 async function checkPython(ws: AdaptWorkspace, entry: string, opts: RuntimeCheckOptions): Promise<RunEvidence[]> {
   const ev: RunEvidence[] = [];
   const py = pythonExeFor(opts);
-  const entryPath = join(ws.dir, entry);
+  const entryPath = ws.resolveSafe(entry);
 
   // py_compile
   const t0 = Date.now();
-  const c = await run(py, ['-m', 'py_compile', entryPath], { cwd: ws.dir, env: minimalEnv() });
+  const c = await run(py, ['-m', 'py_compile', entryPath], { cwd: ws.dir, env: sandboxedEnv() });
   ev.push({
-    method: 'node_check',
+    method: 'py_compile',
     passed: c.code === 0,
     detail: c.code === 0 ? 'py_compile 通过' : c.stderr.slice(0, 400),
     durationMs: Date.now() - t0,
@@ -108,16 +146,23 @@ async function checkPython(ws: AdaptWorkspace, entry: string, opts: RuntimeCheck
     const t1 = Date.now();
     const smoke = await run(py, [entryPath], {
       cwd: ws.dir,
-      env: minimalEnv({
+      env: sandboxedEnv({
         LINGFANG_PLUGIN_BRIDGE_URL: 'http://127.0.0.1:0',
         LINGFANG_PLUGIN_BRIDGE_TOKEN: 'placeholder',
       }),
       timeoutMs: 20000,
     });
     ev.push({
+      // 此前是 `code === 0 || code === -1 ? true : true`——恒为真，等于没检查。
+      // 现在：0=正常退出、-1=超时/拉起失败 都记为失败，其余退出码如实记录但不阻断。
       method: 'import_smoke',
-      passed: smoke.code === 0 || smoke.code === -1 ? true : true, // 仅探测依赖可导入；退出码非 0 多为运行期逻辑，不阻断
-      detail: smoke.code === 0 ? '启动未立即崩溃' : `启动退出码 ${smoke.code}（可能为运行期逻辑，非依赖问题）`,
+      passed: smoke.code === 0,
+      detail:
+        smoke.code === 0
+          ? '启动未立即崩溃'
+          : smoke.code === -1
+            ? '启动超时或拉起失败（20s）'
+            : `启动退出码 ${smoke.code}（运行期逻辑退出，非依赖问题）`,
       durationMs: Date.now() - t1,
     });
   }
@@ -127,10 +172,10 @@ async function checkPython(ws: AdaptWorkspace, entry: string, opts: RuntimeCheck
 async function checkNode(ws: AdaptWorkspace, entry: string, opts: RuntimeCheckOptions): Promise<RunEvidence[]> {
   const ev: RunEvidence[] = [];
   const node = nodeExeFor(opts);
-  const entryPath = join(ws.dir, entry);
+  const entryPath = ws.resolveSafe(entry);
 
   const t0 = Date.now();
-  const check = await run(node, ['--check', entryPath], { cwd: ws.dir, env: minimalEnv() });
+  const check = await run(node, ['--check', entryPath], { cwd: ws.dir, env: sandboxedEnv() });
   ev.push({
     method: 'node_check',
     passed: check.code === 0,
@@ -140,44 +185,45 @@ async function checkNode(ws: AdaptWorkspace, entry: string, opts: RuntimeCheckOp
 
   if (opts.execute !== false) {
     const t1 = Date.now();
-    const { spawn } = await import('node:child_process');
-    const child = spawn(node, [entryPath], {
-      cwd: ws.dir,
-      env: {
-        ...process.env,
-        ...minimalEnv({
+    return (async () => {
+      const { spawn } = await import('node:child_process');
+      const child = spawn(node, [entryPath], {
+        cwd: ws.dir,
+        detached: process.platform !== 'win32',
+        env: sandboxedEnv({
           LINGFANG_PLUGIN_BRIDGE_URL: 'http://127.0.0.1:0',
           LINGFANG_PLUGIN_BRIDGE_TOKEN: 'placeholder',
         }),
-      },
-      stdio: ['ignore', 'ignore', 'pipe'],
-    });
-    const alive = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(true), opts.shortRunMs ?? 3500);
-      child.on('exit', () => {
-        clearTimeout(timer);
-        resolve(false);
+        stdio: ['ignore', 'ignore', 'pipe'],
       });
-      child.on('error', () => {
-        clearTimeout(timer);
-        resolve(false);
+      const alive = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(true), opts.shortRunMs ?? 3500);
+        child.on('exit', () => {
+          clearTimeout(timer);
+          resolve(false);
+        });
+        child.on('error', () => {
+          clearTimeout(timer);
+          resolve(false);
+        });
       });
-    });
-    try {
-      child.kill('SIGKILL');
-    } catch {}
-    ev.push({
-      method: 'short_run',
-      passed: alive,
-      detail: alive ? `启动后存活（${opts.shortRunMs ?? 3500}ms 未退）` : '启动后随即退出',
-      durationMs: Date.now() - t1,
-    });
+      try {
+        await killTree(child);
+      } catch {}
+      ev.push({
+        method: 'short_run',
+        passed: alive,
+        detail: alive ? `启动后存活（${opts.shortRunMs ?? 3500}ms 未退）` : '启动后随即退出',
+        durationMs: Date.now() - t1,
+      });
+      return ev;
+    })();
   }
   return ev;
 }
 
 function checkClient(ws: AdaptWorkspace, entry: string): RunEvidence[] {
-  const entryPath = join(ws.dir, entry);
+  const entryPath = ws.resolveSafe(entry);
   if (!existsSync(entryPath)) {
     return [{ method: 'html_check', passed: false, detail: `UI 入口不存在: ${entry}` }];
   }

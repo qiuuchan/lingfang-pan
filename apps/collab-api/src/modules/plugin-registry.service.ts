@@ -68,6 +68,7 @@ import {
   releaseDetailJson,
   releaseJson,
   releaseListJson,
+  type NormalizedReleaseSource,
   type RedeemedAdaptation,
   type ReleaseSourceHeaders,
 } from './plugin-registry-model';
@@ -483,12 +484,10 @@ export class PluginRegistryService {
     sourceHeaders: ReleaseSourceHeaders = {}
   ) {
     const membership = await this.auth.ensureCurrentTeam(userId);
-    const adaptation = await this.redeemAdaptationReport(
-      sourceHeaders.adaptationReportId,
-      userId,
-      membership.teamId
-    );
-    const source = normalizeReleaseSource(sourceHeaders, adaptation);
+    // 注意：暂存报告的兑付（消费）推迟到发布事务内、真正落库前才执行——
+    // 上传失败 / manifest 不合规 / 权限不足时报告必须保持未消费，否则用户每次重试
+    // 都要重新跑一遍适配流水线。CAS（consumedAt=null）语义不变。
+    let source: NormalizedReleaseSource;
     let staged: UploadResult;
     try {
       staged = await this.spoolUpload(stream, contentLength);
@@ -563,6 +562,13 @@ export class PluginRegistryService {
       artifactKey = `${pkg.id}/${inspected.manifest.version}/${staged.sha256}.lfplugin`;
       await this.artifacts.promote(staged.path, artifactKey, staged.sha256);
       const published = await this.serializableTransaction(async (tx) => {
+        // 发布事务内兑付报告 + 归一化来源（fail-closed：ADAPT 自报无证据 → 400 回滚）。
+        const adaptation = await this.redeemAdaptationReport(
+          sourceHeaders.adaptationReportId,
+          userId,
+          membership.teamId
+        );
+        source = normalizeReleaseSource(sourceHeaders, adaptation);
         const activePackage = await tx.pluginPackage.findUnique({ where: { id: pkg!.id } });
         if (!activePackage || activePackage.governanceStatus !== 'ACTIVE')
           throw conflict('已归档插件包不能发布新版本');

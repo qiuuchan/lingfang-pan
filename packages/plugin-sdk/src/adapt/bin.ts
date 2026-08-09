@@ -83,7 +83,9 @@ async function main(): Promise<number> {
       error: { message: error instanceof Error ? error.message : String(error) },
     };
   }
-  process.stdout.write(JSON.stringify(response));
+  // 协议约定 stdout 只有一行 JSON；补尾部换行，让按行读取的调用方（Rust read_line）
+  // 不必等 EOF 也能拿到完整响应。
+  process.stdout.write(JSON.stringify(response) + '\n');
   return response.ok ? 0 : 1;
 }
 
@@ -97,7 +99,7 @@ main().then(
       JSON.stringify({
         ok: false,
         error: { message: error instanceof Error ? error.message : String(error) },
-      })
+      }) + '\n'
     );
     process.exitCode = 1;
   }

@@ -61,7 +61,10 @@ describe('transform A1 缺字段补齐', () => {
   it('从 name 生成 id，缺 runtime/entry/version 给默认值', () => {
     const dir = makePlugin({ 'manifest.json': JSON.stringify({ name: 'My Cool Plugin', capabilities: [] }) });
     const ws = new AdaptWorkspace(dir);
+    // readManifest 对损坏 JSON 返回 null；正常解析后非空（A1 的目标就是这种缺字段 manifest）。
     const manifest = ws.readManifest();
+    expect(manifest).not.toBeNull();
+    if (!manifest) return;
     const fixes = transformMissingFields(ws, manifest);
     ws.writeManifest(manifest);
     expect(manifest.id).toMatch(/^[a-z]/);
@@ -80,6 +83,8 @@ describe('transform A2 entry/runtime', () => {
     });
     const ws = new AdaptWorkspace(dir);
     const manifest = ws.readManifest();
+    expect(manifest).not.toBeNull();
+    if (!manifest) return;
     transformEntry(ws, manifest);
     ws.writeManifest(manifest);
     expect(manifest.entry).toBe('ui/index.html');
@@ -94,6 +99,8 @@ describe('transform A3 能力自动探测', () => {
     });
     const ws = new AdaptWorkspace(dir);
     const manifest = ws.readManifest();
+    expect(manifest).not.toBeNull();
+    if (!manifest) return;
     transformCapabilities(ws, manifest);
     const kinds = (manifest.capabilities as Array<{ kind: string }>).map((c) => c.kind);
     expect(kinds).toContain('net.fetch');
@@ -109,6 +116,8 @@ describe('transform A4 AI 边界归一化', () => {
     });
     const ws = new AdaptWorkspace(dir);
     const manifest = ws.readManifest();
+    expect(manifest).not.toBeNull();
+    if (!manifest) return;
     const fixes = transformAiBoundary(ws, manifest);
     const next = ws.readFile('index.js') ?? '';
     expect(next).toContain("process.env.LINGFANG_PLUGIN_BRIDGE_URL + '/v1'");

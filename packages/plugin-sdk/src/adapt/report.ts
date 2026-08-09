@@ -21,7 +21,7 @@ export type AdaptationSeverity = 'auto_fixable' | 'needs_human' | 'fixed';
 
 /** 运行时确证的证据项。 */
 export interface RunEvidence {
-  method: 'import_smoke' | 'node_check' | 'short_run' | 'html_check' | 'bridge_handshake' | 'none';
+  method: 'import_smoke' | 'py_compile' | 'node_check' | 'short_run' | 'html_check' | 'bridge_handshake' | 'none';
   passed: boolean;
   detail?: string;
   durationMs?: number;
@@ -95,7 +95,8 @@ export function buildReport(input: {
   const remaining = issues.filter(
     (i) => i.severity === 'needs_human' || i.severity === 'auto_fixable'
   );
-  const ok = remaining.length === 0;
+  // ok 必须与 status 同向：确证失败（executed 但 canRun=false）时即使零残留问题也不能算 ok。
+  const ok = remaining.length === 0 && !(input.executed && input.canRun === false);
   const canRun = input.canRun ?? false;
 
   // status 会随发布上送服务端并成为审核依据，所以「没跑流水线」和「跑了但没过」
@@ -109,9 +110,11 @@ export function buildReport(input: {
 
   const summary = !input.adapted
     ? `静态校验完成：发现 ${issues.length} 个问题（未执行改造）`
-    : ok
-      ? `适配通过（应用 ${fixesApplied.length} 项自动改造）`
-      : `适配未完成：剩余 ${remaining.length} 项待人工/agent 处理（已应用 ${fixesApplied.length} 项自动改造）`;
+    : status === 'ADAPTED_FAILED' && !ok
+      ? `确证失败：运行时应答不可用（已应用 ${fixesApplied.length} 项自动改造）`
+      : ok
+        ? `适配通过（应用 ${fixesApplied.length} 项自动改造）`
+        : `适配未完成：剩余 ${remaining.length} 项待人工/agent 处理（已应用 ${fixesApplied.length} 项自动改造）`;
 
   return {
     ok,

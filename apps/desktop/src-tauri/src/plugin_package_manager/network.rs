@@ -451,6 +451,7 @@ mod tests {
             package_id: None,
             source_kind: Some(PluginReleaseSourceKind::LocalArtifact),
             source_label: Some(artifact_path.to_string_lossy().to_string()),
+            adaptation_report_id: None,
         };
 
         let (prepared_path, inspected, provenance) = prepare_local_artifact(&input).unwrap();

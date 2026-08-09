@@ -4,7 +4,7 @@
 // 全部幂等：重复执行结果一致。只改临时 adaptation 工作区，绝不碰用户原始源码
 // （拷贝由 index.ts 编排器负责）。A4 等高风险改造保留 diff 供人工复核。
 
-import type { AdaptationIssue, FixApplied } from './report.ts';
+import type { FixApplied } from './report.ts';
 import type { AdaptWorkspace } from './workspace.ts';
 
 const ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9-_.]*$/;
@@ -74,7 +74,6 @@ export function transformEntry(ws: AdaptWorkspace, manifest: Record<string, unkn
   const exts = RUNTIME_ENTRY_DEFAULT[rt] ? RUNTIME_ENTRY_EXT[rt] : ['.html', '.js', '.mjs', '.cjs', '.py'];
   let entry = (manifest.entry as string) || RUNTIME_ENTRY_DEFAULT[rt] || 'index.html';
 
-  const expectedExt = exts[0];
   const hasCorrectExt = exts.some((e) => entry.endsWith(e));
 
   if (ws.exists(entry)) {
@@ -103,9 +102,8 @@ export function transformEntry(ws: AdaptWorkspace, manifest: Record<string, unkn
       if (skeleton != null) {
         ws.writeFile(entry, skeleton);
         fixes.push({ code: 'A2_entry_skeleton', category: 'runtime', message: `入口缺失，生成最小骨架 ${entry}`, path: 'entry' });
-      } else {
-        fixes.push({ code: 'A2_entry_missing', category: 'runtime', severity: 'needs_human' as never, message: `入口文件 ${entry} 不存在且无法推断骨架`, path: 'entry' } as FixApplied);
       }
+      // 无法推断骨架：不记录为「已应用改造」——由重新校验时的 entry_not_found 问题如实暴露。
     }
   }
 
@@ -138,7 +136,10 @@ export function transformCapabilities(ws: AdaptWorkspace, manifest: Record<strin
   if (sources.size === 0) return fixes;
 
   const found = new Set<string>();
-  for (const content of sources.values()) {
+  for (const [rel, content] of sources) {
+    // 只扫实际代码文件：README/说明文档里的示例字符串（\bfetch\b、kv\. 等）会被
+    // 未锚定的 CAP_MAP 命中，导致 manifest 被过度授权，违反插件隔离的最少权限原则。
+    if (/\.(md|txt)$/.test(rel)) continue;
     for (const m of CAP_MAP) {
       if (m.re.test(content)) found.add(m.kind);
     }
@@ -162,12 +163,18 @@ export function transformCapabilities(ws: AdaptWorkspace, manifest: Record<strin
 }
 
 /** A4 AI 边界归一化：把硬编码 baseUrl/key/provider 改写为桥接模式（仅在临时工作区，保留 diff）。 */
-export function transformAiBoundary(ws: AdaptWorkspace, _manifest: Record<string, unknown>): FixApplied[] {
+export function transformAiBoundary(ws: AdaptWorkspace, manifest: Record<string, unknown>): FixApplied[] {
   const fixes: FixApplied[] = [];
   const sources = ws.readAllSources();
-  const isPython = /(\.py)$/.test([...sources.keys()].find((k) => /\.py$/.test(k)) ?? '');
+  if (sources.size === 0) return fixes;
+  const runtimeType = String(manifest.runtime_type ?? 'client');
 
   for (const [rel, content] of sources) {
+    // 按**当前文件**的语言选择桥接写法，而不是看工作区里有没有任何 .py 文件：
+    // 混语言工作区里 JS 也吃过 `os.environ[...]`，被改成 Python 语法（修复前行为）。
+    const isPython = /\.py$/.test(rel);
+    const isJs = /\.(js|mjs|cjs|ts|tsx)$/.test(rel);
+    if (!isPython && !isJs) continue;
     let next = content;
     let changed = false;
 
@@ -176,7 +183,10 @@ export function transformAiBoundary(ws: AdaptWorkspace, _manifest: Record<string
       changed = true;
       const replacement = isPython
         ? `base_url=os.environ['LINGFANG_PLUGIN_BRIDGE_URL'] + '/v1'`
-        : `baseURL: process.env.LINGFANG_PLUGIN_BRIDGE_URL + '/v1'`;
+        : runtimeType === 'client'
+          ? // webview 里没有 process：用带 typeof 守卫的写法，避免 ReferenceError 直接崩掉插件。
+            `baseURL:(typeof process!=='undefined'?(process.env?.LINGFANG_PLUGIN_BRIDGE_URL??''):'')+'/v1'`
+          : `baseURL: process.env.LINGFANG_PLUGIN_BRIDGE_URL + '/v1'`;
       fixes.push({ code: 'A4_base_url', category: 'ai_boundary', message: 'base URL 归一化为桥接模式', path: rel, diff: { before: m, after: replacement } });
       return replacement;
     });
@@ -195,6 +205,21 @@ export function transformAiBoundary(ws: AdaptWorkspace, _manifest: Record<string
       return '';
     });
 
+    // 硬编码凭据 → 桥 token（A4_key）。覆盖 validate 的 leaked_openai_key / leaked_api_key
+    // 所告发的两种形态：`api[key] = 'sk-……'` 以及任意 `apiKey[:=]` 长串字面量。
+    next = next.replace(/([A-Za-z_$][\w$]*\s*[:=]\s*)['"](sk-[a-zA-Z0-9_-]{8,}|[a-zA-Z0-9_-]{25,})['"]/g, (m, left, _secret) => {
+      const leftText = String(left);
+      if (!/api[_-]?key|token/i.test(leftText)) return m;
+      const tokenExpr = isPython
+        ? `os.environ['LINGFANG_PLUGIN_BRIDGE_TOKEN']`
+        : runtimeType === 'client'
+          ? `(typeof process !== 'undefined' ? (process.env?.LINGFANG_PLUGIN_BRIDGE_TOKEN ?? '') : '')`
+          : `process.env.LINGFANG_PLUGIN_BRIDGE_TOKEN`;
+      changed = true;
+      fixes.push({ code: 'A4_key', category: 'ai_boundary', message: '硬编码凭据改写为桥接 token', path: rel });
+      return `${String(left)}${tokenExpr}`;
+    });
+
     if (changed) ws.writeFile(rel, next);
   }
   return fixes;
@@ -207,7 +232,9 @@ export function transformDependencies(ws: AdaptWorkspace, manifest: Record<strin
   if (ws.exists('requirements.txt')) return fixes;
 
   const sources = ws.readAllSources();
-  const IMPORT_RE = /^import\s+([a-zA-Z_][\w.]*)|^from\s+([a-zA-Z_][\w.]*)\s+import/m;
+  // 必须带 g 标记：matchAll 遇到非全局 RegExp 会直接抛 TypeError（ES 规范），
+  // 否则任何有 .py 源文件且无 requirements.txt 的插件都会让整个适配流水线崩掉。
+  const IMPORT_RE = /^import\s+([a-zA-Z_][\w.]*)|^from\s+([a-zA-Z_][\w.]*)\s+import/gm;
   const stdlib = new Set([
     'os','sys','re','json','math','time','datetime','pathlib','argparse','collections','typing',
     'functools','itertools','random','string','hashlib','base64','io','subprocess','shutil','glob',
@@ -242,9 +269,4 @@ export function applyTransforms(ws: AdaptWorkspace, manifest: Record<string, unk
   all.push(...transformAiBoundary(ws, manifest));
   all.push(...transformDependencies(ws, manifest));
   return all;
-}
-
-export { issuesToFixableCodes };
-function issuesToFixableCodes(issues: AdaptationIssue[]): AdaptationIssue[] {
-  return issues.filter((i) => i.fixable);
 }

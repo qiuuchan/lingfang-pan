@@ -596,7 +596,8 @@ export const sdk = {
   // 此处将 credits ÷100 还原为插件作者契约的「灵石」，避免静默的 breaking change（P2-1）。
   video: {
     generate: async (input: VideoGenerateInput): Promise<VideoGenerateResult> => {
-      const data = await invokeAi<Record<string, unknown>>('video.generate', input);
+      // 老版本桥/异常返回可能整体不是对象（如 undefined），先兜底再取字段，避免 TypeError 打崩插件。
+      const data = (await invokeAi<Record<string, unknown> | undefined>('video.generate', input)) ?? {};
       const rawCredits = typeof data.credits === 'number' ? data.credits : 0;
       return {
         task_id: String(data.task_id ?? ''),

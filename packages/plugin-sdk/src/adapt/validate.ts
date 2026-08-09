@@ -10,12 +10,6 @@ import type { PluginManifest } from '@lingfang/contract';
 import type { AdaptationIssue } from './report.ts';
 import type { AdaptWorkspace } from './workspace.ts';
 
-const RUNTIME_ENTRY_DEFAULT: Record<string, string> = {
-  client: 'ui/index.html',
-  nodejs: 'index.js',
-  python: 'main.py',
-};
-
 /** 复用 validate.ts 的 requirements.txt / package.json 格式检查思路。 */
 function structureIssues(ws: AdaptWorkspace, manifest: PluginManifest): AdaptationIssue[] {
   const issues: AdaptationIssue[] = [];
@@ -30,9 +24,9 @@ function structureIssues(ws: AdaptWorkspace, manifest: PluginManifest): Adaptati
       message: `入口文件不存在: ${manifest.entry}`,
       fixable: true,
     });
-  } else if (!readFileSync(entryPath, 'utf-8') || true) {
-    // 存在即视为通过（内容检查交给 runtime-check）
   }
+  // 存在即视为通过（内容检查交给 runtime-check）；不要在这里无条件 readFileSync——
+  // entry 指向目录/无读权限时会让 validateWorkspace 抛异常，违反「返回问题而非抛错」的契约。
 
   if (manifest.runtime_type === 'nodejs') {
     const pkgPath = join(ws.dir, 'package.json');
@@ -56,7 +50,8 @@ function structureIssues(ws: AdaptWorkspace, manifest: PluginManifest): Adaptati
     const reqPath = join(ws.dir, 'requirements.txt');
     if (existsSync(reqPath)) {
       const content = readFileSync(reqPath, 'utf-8');
-      const PIP_PATTERN = /^[a-zA-Z0-9_.-]+(?:[<>=!~]=?.*)?$/;
+      // 名字部分已在前一步 split 掉版本操作符，这里的版本后缀组永远匹配不到，纯属死逻辑。
+      const PIP_PATTERN = /^[a-zA-Z0-9_.-]+$/;
       content.split('\n').forEach((rawLine, i) => {
         const line = rawLine.trim();
         if (line === '' || line.startsWith('#') || line.startsWith('-')) return;
@@ -111,6 +106,8 @@ function aiBoundaryIssues(ws: AdaptWorkspace): AdaptationIssue[] {
   ];
 
   for (const [rel, content] of sources) {
+    // 只扫实际代码文件（与 transform A3 对齐）：文档里的示例 key 不应既告警又进适配报告。
+    if (/\.(md|txt)$/.test(rel)) continue;
     for (const p of LEAK_PATTERNS) {
       const m = p.re.exec(content);
       if (m) {
@@ -121,7 +118,9 @@ function aiBoundaryIssues(ws: AdaptWorkspace): AdaptationIssue[] {
           severity: 'auto_fixable',
           path: `${rel}:${lineNo}`,
           message: p.message,
-          detail: `命中: ${m[0].slice(0, 40)}…`,
+          // 绝不在 detail 里回显整段命中内容：报告会上送服务端并落库（P2 摄入闸），
+          // 明文 key 一旦落库就是持久化泄漏，只留首尾各 4 个字符用于人工定位。
+          detail: `命中: ${m[0].slice(0, 4)}…${m[0].slice(-4)}（已打码）`,
           fixable: true,
         });
       }
@@ -184,7 +183,7 @@ function manifestErrorToIssue(e: ManifestError): AdaptationIssue {
     'invalid_id',
     'invalid_version',
     'entry_runtime_mismatch',
-    'unsage_entry_path',
+    'unsafe_entry_path',
     'unknown_capability',
     'duplicate_capability',
   ]);
@@ -197,5 +196,3 @@ function manifestErrorToIssue(e: ManifestError): AdaptationIssue {
     fixable: autoFixableCodes.has(e.code),
   };
 }
-
-export { RUNTIME_ENTRY_DEFAULT };
