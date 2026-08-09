@@ -23,6 +23,10 @@ const SOURCE_KIND_HEADER: HeaderName = HeaderName::from_static("x-plugin-source-
 const SOURCE_LABEL_HEADER: HeaderName = HeaderName::from_static("x-plugin-source-label-b64");
 const PACKAGE_ID_HEADER: HeaderName = HeaderName::from_static("x-plugin-package-id");
 const CLIENT_HEADER: HeaderName = HeaderName::from_static("x-client");
+/// 适配报告暂存 id（先 `POST /api/plugin-registry/adaptation-reports` 换 id，
+/// 发布时只带 id）。服务端据此赎回存储的报告并落库，避免大体积中文报告塞进 ASCII 受限的 HTTP 头。
+const ADAPTATION_REPORT_ID_HEADER: HeaderName =
+    HeaderName::from_static("x-adaptation-report-id");
 
 fn resolve_provenance(
     source_kind: Option<PluginReleaseSourceKind>,
@@ -39,6 +43,7 @@ fn artifact_upload_headers(
     total_bytes: u64,
     package_id: Option<&str>,
     provenance: &ReleaseProvenance,
+    adaptation_report_id: Option<&str>,
 ) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -68,6 +73,16 @@ fn artifact_upload_headers(
                 .map_err(|error| format!("插件 packageId 无法写入请求头：{error}"))?,
         );
     }
+    if let Some(report_id) = adaptation_report_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        headers.insert(
+            ADAPTATION_REPORT_ID_HEADER,
+            HeaderValue::from_str(report_id)
+                .map_err(|error| format!("适配报告 id 无法写入请求头：{error}"))?,
+        );
+    }
     Ok(headers)
 }
 
@@ -77,6 +92,7 @@ async fn upload_artifact_file(
     auth_token: &str,
     package_id: Option<&str>,
     provenance: &ReleaseProvenance,
+    adaptation_report_id: Option<&str>,
     on_event: Channel<PackageTransferEvent>,
 ) -> Result<Value, String> {
     let total_bytes = fs::metadata(path)
@@ -105,7 +121,7 @@ async fn upload_artifact_file(
             }
         }
     });
-    let headers = artifact_upload_headers(total_bytes, package_id, provenance)?;
+    let headers = artifact_upload_headers(total_bytes, package_id, provenance, adaptation_report_id)?;
     let url = format!(
         "{}/api/plugin-registry/releases",
         api_base.trim_end_matches('/')
@@ -335,6 +351,7 @@ pub(crate) async fn publish_draft_workspace(
         &input.auth_token,
         input.package_id.as_deref(),
         &provenance,
+        input.adaptation_report_id.as_deref(),
         on_event.clone(),
     )
     .await?;
@@ -379,6 +396,7 @@ pub(crate) async fn publish_local_artifact(
         &input.auth_token,
         input.package_id.as_deref(),
         &provenance,
+        input.adaptation_report_id.as_deref(),
         on_event.clone(),
     )
     .await?;
@@ -403,7 +421,7 @@ mod tests {
             Some("Cursor 工作区"),
         )
         .unwrap();
-        let headers = artifact_upload_headers(42, Some("package-1"), &provenance).unwrap();
+        let headers = artifact_upload_headers(42, Some("package-1"), &provenance, None).unwrap();
         assert_eq!(headers.get(CLIENT_HEADER).unwrap(), "desktop");
         assert_eq!(headers.get(SOURCE_KIND_HEADER).unwrap(), "EXTERNAL_TOOL");
         assert_eq!(headers.get(PACKAGE_ID_HEADER).unwrap(), "package-1");

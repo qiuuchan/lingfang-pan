@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
+use uuid::Uuid;
 
 use crate::process_util::{kill_child_tree, GuardedChild, GuardedCommand, SandboxPolicy, SandboxTier};
 use crate::runtime_resolver::RuntimeResolver;
@@ -109,6 +110,17 @@ fn run_plugin_adapt_blocking(
         "adapt"
     };
 
+    // repack 重新打包产物默认落到系统临时目录（而非用户源码目录），避免污染作者工程。
+    // 仅当请求未显式指定 out_dir 时默认；产物绝对路径随报告 `artifactPath` 回传前端。
+    let out_dir = if request.repack && request.out_dir.is_none() {
+        let dir = std::env::temp_dir().join(format!("lingfang-adapt-out-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("创建适配产物临时目录失败：{e}"))?;
+        Some(dir.to_string_lossy().to_string())
+    } else {
+        request.out_dir.clone()
+    };
+
     // 把解析到的内置运行时绝对路径经协议传给引擎，供 `execute` 确证使用。
     let mut runtime = serde_json::Map::new();
     if let Some(node_exe) = resolver.node() {
@@ -130,7 +142,7 @@ fn run_plugin_adapt_blocking(
         "inPlace": request.in_place,
         "execute": request.execute,
         "repack": request.repack,
-        "outDir": request.out_dir,
+        "outDir": out_dir,
         "runtime": serde_json::Value::Object(runtime),
     });
 

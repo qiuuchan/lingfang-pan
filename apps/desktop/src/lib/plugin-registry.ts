@@ -12,6 +12,8 @@ import type {
   PluginReleaseSourceKind,
   PluginReleaseDetail,
   PluginReleaseSummary,
+  AdaptationStatus,
+  StageAdaptationReportResponse,
 } from '@lingfang/contract';
 import { api, apiBase, errorMessage, getAuthToken, tauriInvoke } from '@/lib/api';
 import type { DraftFile, LoadedPlugin } from '@/lib/types';
@@ -42,6 +44,83 @@ export type RegistryReleaseStatus = RegistryRelease['status'];
 export type RegistrySourceKind = PluginReleaseSourceKind;
 export type Installation = LocalPluginInstallation;
 export type Workspace = DraftWorkspace;
+
+// ---------------------------------------------------------------------------
+// 适配检验改造流水线（P1 桌面端上传 / 适配 / 发布）
+// ---------------------------------------------------------------------------
+
+export type AdaptationSeverity = 'auto_fixable' | 'needs_human' | 'fixed';
+
+export type AdaptationCategory =
+  | 'manifest'
+  | 'structure'
+  | 'runtime'
+  | 'capability'
+  | 'ai_boundary'
+  | 'dependency'
+  | 'execution';
+
+export interface AdaptationIssue {
+  code: string;
+  category: AdaptationCategory;
+  severity: AdaptationSeverity;
+  /** manifest 字段或文件路径。 */
+  path?: string;
+  message: string;
+  detail?: string;
+  /** 确定性 transform 能否修复。 */
+  fixable: boolean;
+}
+
+export interface FixApplied {
+  code: string;
+  category: AdaptationCategory;
+  message: string;
+  path?: string;
+  /** 改造前后的差异，便于人工复核（尤其 A4 AI 边界归一化）。 */
+  diff?: { before?: string; after?: string } | string;
+}
+
+/** 适配引擎产出的最终报告（snake_case 沿用仓库 manifest 边界规范）。 */
+export interface PluginAdaptationReport {
+  /** 整体是否通过。注意：ok=true 也可能带 status=NEEDS_HUMAN，UI 须按 status 分支。 */
+  ok: boolean;
+  pluginId?: string;
+  runtimeType?: string;
+  issues: AdaptationIssue[];
+  fixesApplied: FixApplied[];
+  /** 改造后仍需人工 / agent 处理的问题。 */
+  remaining: AdaptationIssue[];
+  /** 是否确证可运行（仅执行了运行时检查才为 true）。 */
+  canRun: boolean;
+  runEvidence?: Array<{ method: string; passed: boolean; detail?: string; durationMs?: number }>;
+  /** 流水线最终状态；发布时随报告上送服务端落库。 */
+  status: AdaptationStatus;
+  summary: string;
+  /** 生成报告的引擎版本。 */
+  engineVersion: string;
+  /** AdaptResult 扩展字段：改造工作区目录 / repack 产物路径（本地绝对路径）。 */
+  workspaceDir?: string;
+  artifactPath?: string;
+}
+
+export interface RunPluginAdaptRequest {
+  /** 插件目录（绝对路径）。 */
+  pluginDir: string;
+  mode?: 'validate' | 'adapt';
+  inPlace?: boolean;
+  /** 是否做运行时确证（短跑/冒烟）。 */
+  execute?: boolean;
+  /** 是否改造后重新打包成 .lfplugin（产物落临时目录，路径随 artifactPath 回传）。 */
+  repack?: boolean;
+  outDir?: string;
+}
+
+export interface RunPluginAdaptResponse {
+  ok: boolean;
+  report: PluginAdaptationReport | null;
+  error: string | null;
+}
 export type {
   MarketplaceListingProjection,
   PluginManagementItem,
@@ -161,6 +240,47 @@ export async function selectPluginArtifact(): Promise<string | null> {
 
 export function inspectLocalArtifact(artifactPath: string): Promise<PluginArtifactInspection> {
   return tauriInvoke<PluginArtifactInspection>('inspect_lfplugin_v4', { artifactPath });
+}
+
+/**
+ * Open the native folder picker for a raw plugin directory. Browser-only
+ * development and tests return null so callers can keep a manual-path fallback
+ * without triggering a Tauri error toast.
+ */
+export async function selectPluginDirectory(): Promise<string | null> {
+  if (!isTauri()) return null;
+  const options = {
+    multiple: false as const,
+    directory: true as const,
+  };
+  try {
+    const selected = await openDialog(options);
+    const path = Array.isArray(selected) ? selected[0] : selected;
+    return typeof path === 'string' && path.trim() ? path : null;
+  } catch (caught) {
+    throw new Error(errorMessage(caught, '选择插件目录失败'));
+  }
+}
+
+/**
+ * 在当前桌面端用**内置 Node.js** 拉起确定性适配引擎，对本地插件目录做校验 / 改造，
+ * 并（可选）重新打包成 .lfplugin。产物绝对路径随 `report.artifactPath` 回传。
+ */
+export function runPluginAdapt(request: RunPluginAdaptRequest): Promise<RunPluginAdaptResponse> {
+  return tauriInvoke<RunPluginAdaptResponse>('run_plugin_adapt', request as unknown as Record<string, unknown>);
+}
+
+/**
+ * 把适配报告原文暂存到服务端换回 `reportId`，发布时只带这个 id（避免大体积中文报告
+ * 塞进 ASCII 受限的 HTTP 头）。服务端按白名单归一 status，客户端伪造只会退化成 NOT_RUN。
+ */
+export async function stageAdaptationReport(
+  report: Record<string, unknown>
+): Promise<StageAdaptationReportResponse> {
+  return api<StageAdaptationReportResponse>('/api/plugin-registry/adaptation-reports', {
+    method: 'POST',
+    body: { report },
+  });
 }
 
 export async function listInstallations(): Promise<Installation[]> {
@@ -532,7 +652,7 @@ export async function importLocalArtifact(artifactPath: string): Promise<Install
 
 export async function publishLocalArtifact(
   artifactPath: string,
-  options: Partial<PluginProvenance> & { packageId?: string } = {},
+  options: Partial<PluginProvenance> & { packageId?: string; adaptationReportId?: string } = {},
   onProgress?: (progress: TransferProgress) => void
 ): Promise<RegistryPublishResult> {
   const { base, token } = connection();
@@ -545,6 +665,7 @@ export async function publishLocalArtifact(
       packageId: options.packageId || undefined,
       sourceKind: provenance.sourceKind,
       sourceLabel: provenance.sourceLabel,
+      adaptationReportId: options.adaptationReportId || undefined,
     },
     onEvent: progressChannel(onProgress),
   });
@@ -658,7 +779,11 @@ export function deleteLocalCreatorConversation(
   }
 }
 
-export type PublishWorkspaceOptions = Partial<PluginProvenance> & { packageId?: string };
+export type PublishWorkspaceOptions = Partial<PluginProvenance> & {
+  packageId?: string;
+  /** 适配报告暂存 id（桌面端「本地插件目录」模式跑完适配流水线后暂存换得）。 */
+  adaptationReportId?: string;
+};
 
 export function publishDraftWorkspace(
   workspace: Workspace,
@@ -703,6 +828,7 @@ export async function publishDraftWorkspace(
       packageId: options.packageId || undefined,
       sourceKind: provenance.sourceKind,
       sourceLabel: provenance.sourceLabel,
+      adaptationReportId: options.adaptationReportId || undefined,
     },
     onEvent: progressChannel(onProgress),
   });

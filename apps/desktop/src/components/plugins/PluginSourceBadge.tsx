@@ -6,6 +6,7 @@ const CHANNEL_NAMES: Record<PluginIngestChannel, string> = {
   DESKTOP: '桌面端',
   API: 'API',
   MIGRATION: '迁移',
+  ADAPT: '适配',
 };
 
 export function pluginSourceText(sourceKind: PluginReleaseSourceKind, sourceLabel?: string | null) {

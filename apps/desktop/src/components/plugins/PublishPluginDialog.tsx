@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2Icon,
   FileArchiveIcon,
+  FolderOpenIcon,
   Loader2Icon,
   RefreshCwIcon,
   SendIcon,
+  ShieldCheckIcon,
   StoreIcon,
   UploadIcon,
   XCircleIcon,
@@ -28,14 +30,18 @@ import {
   publishPluginRelease,
   publishLocalArtifact,
   retryMarketplaceSubmission,
+  runPluginAdapt,
   selectPluginArtifact,
+  selectPluginDirectory,
+  stageAdaptationReport,
+  type PluginAdaptationReport,
   type PluginPublishState,
   type RegistryPackage,
   type RegistryRelease,
   type TransferProgress,
   type Workspace,
 } from '@/lib/plugin-registry';
-import type { PluginReleaseSourceKind } from '@lingfang/contract';
+import type { AdaptationStatus, PluginReleaseSourceKind } from '@lingfang/contract';
 import type { StagedPlugin } from '@/lib/plugin-creator/creator-tools';
 
 export type PublishTarget = 'team' | 'market';
@@ -152,6 +158,12 @@ export function PublishPluginDialog({
   const [error, setError] = useState('');
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [summary, setSummary] = useState<ArtifactSummary | null>(null);
+  // 本地插件目录模式：原始目录路径 + 适配报告 + 暂存 id。
+  const [folderPath, setFolderPath] = useState('');
+  const [adaptReport, setAdaptReport] = useState<PluginAdaptationReport | null>(null);
+  const [adaptReportId, setAdaptReportId] = useState<string | undefined>(undefined);
+  const [adaptStage, setAdaptStage] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [adaptError, setAdaptError] = useState('');
   const [publishState, setPublishState] = useState<PluginPublishState>(() => createPluginPublishState(defaultTarget === 'market' ? 'marketplace' : 'team'));
   const wasOpen = useRef(false);
   const notifiedReleaseId = useRef<string | null>(null);
@@ -188,6 +200,11 @@ export function PublishPluginDialog({
     setError('');
     setProgress(null);
     notifiedReleaseId.current = null;
+    setFolderPath('');
+    setAdaptReport(null);
+    setAdaptReportId(undefined);
+    setAdaptStage('idle');
+    setAdaptError('');
     setPublishState(createPluginPublishState(defaultTarget === 'market' ? 'marketplace' : 'team'));
   }, [open, initialArtifactPath, initialWorkspace, draft, defaultSourceKind, defaultSourceLabel, defaultTarget]);
 
@@ -214,6 +231,11 @@ export function PublishPluginDialog({
       const path = await selectPluginArtifact();
       if (!path) return;
       setArtifactPath(path);
+      setFolderPath('');
+      setAdaptReport(null);
+      setAdaptReportId(undefined);
+      setAdaptStage('idle');
+      setAdaptError('');
       setInputMode('artifact');
       setSummary(null);
       setStage('idle');
@@ -225,6 +247,79 @@ export function PublishPluginDialog({
     } catch (caught) {
       setStage('error');
       setError(errorMessage(caught, '选择或检查插件制品失败'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function chooseFolder() {
+    try {
+      const path = await selectPluginDirectory();
+      if (!path) return;
+      setFolderPath(path);
+      setArtifactPath('');
+      setSummary(null);
+      setAdaptReport(null);
+      setAdaptReportId(undefined);
+      setAdaptStage('idle');
+      setAdaptError('');
+      setInputMode('artifact');
+      setStage('idle');
+      setError('');
+    } catch (caught) {
+      setStage('error');
+      setError(errorMessage(caught, '选择插件目录失败'));
+    }
+  }
+
+  /**
+   * 在桌面端用内置 Node.js 跑确定性适配引擎：校验 + 改造 + 运行时确证，并重新打包成
+   * .lfplugin。产物路径随报告回传，暂存报告换得 reportId，随发布请求提交服务端落库。
+   */
+  async function runAdapt() {
+    if (!folderPath.trim() || busy) return;
+    setBusy(true);
+    setAdaptStage('running');
+    setAdaptError('');
+    setAdaptReport(null);
+    setAdaptReportId(undefined);
+    setArtifactPath('');
+    setSummary(null);
+    setStage('idle');
+    setError('');
+    try {
+      const result = await runPluginAdapt({
+        pluginDir: folderPath.trim(),
+        mode: 'adapt',
+        execute: true,
+        repack: true,
+      });
+      if (!result.ok || !result.report) {
+        setAdaptStage('error');
+        setAdaptError(result.error || '适配校验未产出报告');
+        return;
+      }
+      const report = result.report;
+      setAdaptReport(report);
+      setAdaptStage('done');
+      if (report.artifactPath) {
+        setArtifactPath(report.artifactPath);
+        try {
+          setSummary(normalizeInspection(await inspectLocalArtifact(report.artifactPath)));
+        } catch {
+          setSummary(null);
+        }
+      }
+      // 报告暂存失败不阻断发布：报告原文仍会在发布请求体内附带，由服务端尽力解析。
+      try {
+        const staged = await stageAdaptationReport(report as unknown as Record<string, unknown>);
+        setAdaptReportId(staged.reportId);
+      } catch (caught) {
+        toast.warning(errorMessage(caught, '适配报告暂存失败，将随发布请求附带'));
+      }
+    } catch (caught) {
+      setAdaptStage('error');
+      setAdaptError(errorMessage(caught, '适配校验失败'));
     } finally {
       setBusy(false);
     }
@@ -243,6 +338,10 @@ export function PublishPluginDialog({
 
   async function publish() {
     if (!canPublish || busy) return;
+    if (inputMode === 'artifact' && folderPath.trim() && !artifactPath.trim()) {
+      setError('请先对插件目录执行「适配校验并打包」');
+      return;
+    }
     if (inputMode === 'artifact' && !artifactPath.trim()) {
       setError('请选择一个 .lfplugin 制品');
       return;
@@ -269,12 +368,13 @@ export function PublishPluginDialog({
             return publishLocalArtifact(artifactPath.trim(), {
               sourceKind,
               sourceLabel: sourceLabel.trim(),
+              adaptationReportId: adaptReportId,
             }, progressHandler);
           }
           const nextWorkspace = workspace || (onPrepareWorkspace ? await onPrepareWorkspace() : null);
           if (!nextWorkspace) throw new Error('当前没有可发布的草稿工作区');
           setWorkspace(nextWorkspace);
-          return publishDraftWorkspace(nextWorkspace, progressHandler, { sourceKind, sourceLabel: sourceLabel.trim() });
+          return publishDraftWorkspace(nextWorkspace, progressHandler, { sourceKind, sourceLabel: sourceLabel.trim(), adaptationReportId: adaptReportId });
         },
       });
       setPublishState(nextState);
@@ -339,10 +439,22 @@ export function PublishPluginDialog({
             </TabsContent>
             <TabsContent value="artifact" className="space-y-2 pt-3">
               <div className="flex gap-2">
-                <Input className="min-w-0" value={artifactPath} onChange={(event) => { setArtifactPath(event.target.value); setSummary(null); }} placeholder="选择 .lfplugin 文件（开发环境可输入路径）" />
+                <Input className="min-w-0" value={artifactPath} onChange={(event) => { setArtifactPath(event.target.value); setSummary(null); }} placeholder="选择 .lfplugin 制品，或选择插件目录后适配打包（开发环境可输入路径）" />
+                <Button className="shrink-0" type="button" variant="outline" size="icon" title="选择插件目录" onClick={() => void chooseFolder()} disabled={busy}><FolderOpenIcon /></Button>
                 <Button className="shrink-0" type="button" variant="outline" size="icon" title="选择插件制品" onClick={() => void chooseArtifact()} disabled={busy}><FileArchiveIcon /></Button>
                 <Button className="shrink-0" type="button" variant="outline" size="icon" title="检查制品" onClick={() => void inspect()} disabled={busy || !artifactPath.trim()}><RefreshCwIcon /></Button>
               </div>
+              {folderPath.trim() && !artifactPath.trim() && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+                  <FolderOpenIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 break-all text-muted-foreground">{folderPath}</span>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => void runAdapt()} disabled={busy}>
+                    {adaptStage === 'running' ? <Loader2Icon className="animate-spin" /> : <ShieldCheckIcon />}
+                    适配校验并打包
+                  </Button>
+                </div>
+              )}
+              {adaptReport && <AdaptReportPanel report={adaptReport} reportId={adaptReportId} />}
             </TabsContent>
           </Tabs>
 
@@ -387,7 +499,7 @@ export function PublishPluginDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy && stage !== 'market_failed'}>关闭</Button>
-          {stage === 'market_failed' ? <Button onClick={() => void retryMarket()} disabled={busy || !publishState.result || !canSubmitMarket}><RefreshCwIcon />只重试市场提审</Button> : stage === 'done' ? <Button onClick={() => onOpenChange(false)}>完成</Button> : <Button onClick={() => void publish()} disabled={!canPublish || busy || (inputMode === 'artifact' && !artifactPath.trim())}>{busy ? <Loader2Icon className="animate-spin" /> : target === 'market' ? <StoreIcon /> : <SendIcon />}{inputMode === 'artifact' && !summary ? '先检查制品' : target === 'market' ? '发布并提审' : '发布到团队'}</Button>}
+          {stage === 'market_failed' ? <Button onClick={() => void retryMarket()} disabled={busy || !publishState.result || !canSubmitMarket}><RefreshCwIcon />只重试市场提审</Button> : stage === 'done' ? <Button onClick={() => onOpenChange(false)}>完成</Button> : <Button onClick={() => void publish()} disabled={!canPublish || busy || (inputMode === 'artifact' && !artifactPath.trim())}>{busy ? <Loader2Icon className="animate-spin" /> : target === 'market' ? <StoreIcon /> : <SendIcon />}{inputMode === 'artifact' && !summary ? (folderPath.trim() && !artifactPath.trim() ? '先适配校验' : '先检查制品') : target === 'market' ? '发布并提审' : '发布到团队'}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -397,4 +509,49 @@ export function PublishPluginDialog({
 function publishPhaseToStage(phase: PluginPublishState['phase']): Stage {
   if (phase === 'team_failed') return 'error';
   return phase;
+}
+
+function adaptationStatusBadge(status: AdaptationStatus): { label: string; className: string } {
+  switch (status) {
+    case 'ADAPTED_PASSED':
+      return { label: '适配通过', className: 'border-success/30 bg-success/10 text-success' };
+    case 'NEEDS_HUMAN':
+      return { label: '需人工处理', className: 'border-amber-500/40 bg-amber-500/10 text-amber-600' };
+    case 'ADAPTED_FAILED':
+      return { label: '适配失败', className: 'border-destructive/30 bg-destructive/5 text-destructive' };
+    default:
+      return { label: '未适配', className: 'border-border bg-muted/30 text-muted-foreground' };
+  }
+}
+
+function AdaptReportPanel({
+  report,
+  reportId,
+}: {
+  report: PluginAdaptationReport;
+  reportId?: string;
+}) {
+  const badge = adaptationStatusBadge(report.status);
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/10 p-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium">适配校验报告</span>
+        <span className={`rounded-full border px-2 py-0.5 text-xs ${badge.className}`}>{badge.label}</span>
+      </div>
+      <p className="text-xs text-muted-foreground">{report.summary}</p>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span>引擎 v{report.engineVersion}</span>
+        {report.pluginId && <span className="break-all">ID：{report.pluginId}</span>}
+        <span>运行时：{report.runtimeType || '—'}</span>
+        <span>已自动修复：{report.fixesApplied.length}</span>
+        <span>待人工：{report.remaining.length}</span>
+        <span>运行确证：{report.canRun ? '通过' : '未做 / 未过'}</span>
+      </div>
+      {reportId ? (
+        <p className="text-xs text-muted-foreground">报告已暂存（id：{reportId}），将随发布请求提交服务端落库。</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">报告暂存未成功，将随发布请求体附带，由服务端尽力解析。</p>
+      )}
+    </div>
+  );
 }

@@ -378,6 +378,9 @@ pub(crate) struct PublishWorkspaceInput {
     pub source_kind: Option<PluginReleaseSourceKind>,
     #[serde(default)]
     pub source_label: Option<String>,
+    /// 适配报告暂存 id（桌面端「本地插件目录」模式跑完适配流水线后暂存换得）。
+    #[serde(default)]
+    pub adaptation_report_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -391,6 +394,10 @@ pub(crate) struct PublishLocalArtifactInput {
     pub source_kind: Option<PluginReleaseSourceKind>,
     #[serde(default)]
     pub source_label: Option<String>,
+    /// 适配报告暂存 id（先 `POST /api/plugin-registry/adaptation-reports` 换 id，
+    /// 发布时只带 id）。None = 未跑适配流水线，服务端按 NOT_RUN 处理。
+    #[serde(default)]
+    pub adaptation_report_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
