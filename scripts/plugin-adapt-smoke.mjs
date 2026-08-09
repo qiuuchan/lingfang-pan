@@ -6,9 +6,9 @@
 //                → 带 reportId 上传发布（服务端摄入闸复核 + 留证）
 //
 // 用法：
-//   node scripts/plugin-adapt-smoke.mjs                # 三个 runtime 全跑（默认集，期望全绿）
-//   node scripts/plugin-adapt-smoke.mjs --only python  # 只跑指定 runtime（逗号分隔）
-//   node scripts/plugin-adapt-smoke.mjs --probes       # 额外跑「已知集成缺陷探针」（node-sdk）
+//   node scripts/plugin-adapt-smoke.mjs                # 三个 runtime 全跑
+//   node scripts/plugin-adapt-smoke.mjs --only python  # 只跑指定用例（逗号分隔）
+//   node scripts/plugin-adapt-smoke.mjs --probes       # 额外跑已知集成缺陷探针
 //   node scripts/plugin-adapt-smoke.mjs --no-upload    # 只跑引擎，不碰服务端
 //   node scripts/plugin-adapt-smoke.mjs --no-execute   # 跳过运行时确证（无内置运行时的机器）
 //   node scripts/plugin-adapt-smoke.mjs --keep         # 保留临时工作区/产物，便于人工看 diff
@@ -27,8 +27,6 @@
 //   - 每次跑都会把 fixture 拷到临时目录并给 manifest.name 追加 runId，
 //     让 A1 派生出的插件 id 唯一，避免第二次跑撞上「该版本已经发布且不可覆盖」。
 //   - 脚本只读 fixtures，改造与打包一律落在系统临时目录。
-//   - 缺陷探针默认不跑：它们的存在意义是「抓到引擎↔策略闸门未对齐的集成缺陷」，
-//     跑出来记 DEFECT、退出码 2，方便 CI 区分「链路坏了」(1) 与「链路通但有缺陷」(2)。
 
 import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -49,11 +47,14 @@ const CASES = [
   { runtime: 'client', dir: 'client', expectRuntimeType: 'client' },
 ];
 
-// 缺陷探针：已知「引擎判 ADAPTED_PASSED ↔ 服务端策略闸门拒绝」的不对齐场景。
-// 默认不跑（否则 CI 长红），用 --probes 或 --only <name> 显式触发；跑出来记 DEFECT、退出码 2。
+// 缺陷探针：已知「引擎判 ADAPTED_PASSED ↔ 服务端 AI 策略闸门拒收」的不对齐场景。
+// 默认不跑（否则 CI 长红），用 --probes 或 --only <name> 显式触发；命中记 DEFECT、退出码 2。
 const PROBES = [
-  // 插件依赖第三方 AI SDK（@anthropic-ai/sdk）。引擎静态分析只看硬编码 key/url/provider/model，
-  // 不查 SDK 依赖，于是给出 ADAPTED_PASSED；服务端却以 ai.sdk.third_party 拒绝发布。
+  // 引擎 A4 把独立 .js 里的硬编码 base URL 改写成带空兜底的桥接写法，
+  // 服务端策略闸门则把「自定义 bridge 兜底」判为 ai.bridge.custom 拒收。
+  { runtime: 'client-a4gap', dir: 'client-a4gap', expectRuntimeType: 'client', probe: true },
+  // 插件依赖第三方 AI SDK。引擎静态分析只看硬编码 key/url/provider/model，不查 SDK 依赖，
+  // 于是给出 ADAPTED_PASSED；服务端却以 ai.sdk.third_party 拒绝发布。
   { runtime: 'node-sdk', dir: 'node-sdk', expectRuntimeType: 'nodejs', probe: true },
 ];
 
@@ -80,15 +81,15 @@ const HELP = `插件适配检验改造流水线 端到端冒烟
 用法: node scripts/plugin-adapt-smoke.mjs [选项]
 
 选项:
-  --only <a,b>   只跑指定用例（python | node | client | node-sdk），逗号分隔
-  --probes       额外跑「已知集成缺陷探针」（node-sdk），默认不跑
+  --only <a,b>   只跑指定用例（python | node | client | client-a4gap | node-sdk），逗号分隔
+  --probes       额外跑「已知集成缺陷探针」（client-a4gap、node-sdk），默认不跑
   --no-upload    只跑本地适配引擎，不调用 collab-api（无需起服务）
   --no-execute   跳过运行时确证（py_compile / node --check / HTML 检查）
   --keep         保留临时工作区与 .lfplugin 产物路径，便于人工复核 diff
   -h, --help     显示本帮助
 
 退出码:
-  0  三个 runtime 全部闭环
+  0  选中的用例全部闭环
   1  冒烟链路故障（引擎崩了 / 留证失败 / 服务端不可达）—— 先修依赖
   2  链路通但抓到集成缺陷（引擎判通过、服务端策略闸门拒收）—— 记缺陷待修
 
@@ -208,12 +209,25 @@ async function publish(token, artifactPath, reportId, label) {
 async function runCase(testCase, ctx) {
   const label = `冒烟 ${testCase.runtime} 样例`;
   const fixtureDir = join(fixturesRoot, testCase.dir);
-  if (!existsSync(fixtureDir)) throw new Error(`样例目录不存在：${fixtureDir}`);
+  // 单个样例缺失只判该用例失败，不能把整轮冒烟带崩。
+  if (!existsSync(join(fixtureDir, 'manifest.json'))) {
+    console.log(`   × 样例缺失或不完整：${fixtureDir}`);
+    return {
+      runtime: testCase.runtime,
+      probe: testCase.probe === true,
+      ok: false,
+      defect: false,
+      stage: 'fixture',
+      problems: [],
+      error: `样例目录缺少 manifest.json：${fixtureDir}`,
+    };
+  }
 
   const staging = stageFixture(fixtureDir, ctx.runId);
   const outDir = mkdtempSync(join(tmpdir(), 'lingfang-adapt-out-'));
   const result = {
     runtime: testCase.runtime,
+    probe: testCase.probe === true,
     ok: false,
     defect: false,
     staging,
@@ -406,7 +420,7 @@ async function main() {
   for (const r of results) {
     let flag;
     if (r.ok) {
-      flag = 'PASS';
+      flag = r.probe ? 'FIXED?' : 'PASS';
       passCount += 1;
     } else if (r.defect) {
       flag = 'DEFECT';
@@ -416,8 +430,11 @@ async function main() {
       failCount += 1;
     }
     console.log(
-      `   [${flag}] ${r.runtime.padEnd(14)} status=${r.status ?? '-'} fixes=${r.fixesApplied ?? '-'} remaining=${r.remaining ?? '-'} canRun=${r.canRun ?? '-'} engine=${r.engineVersion ?? '-'} reportId=${r.reportId ?? '-'}`
+      `   [${flag.padEnd(6)}] ${r.runtime.padEnd(13)} status=${r.status ?? '-'} fixes=${r.fixesApplied ?? '-'} remaining=${r.remaining ?? '-'} canRun=${r.canRun ?? '-'} engine=${r.engineVersion ?? '-'} reportId=${r.reportId ?? '-'}`
     );
+    if (r.probe && r.ok) {
+      console.log('            i 探针居然闭环了——对应集成缺陷可能已修复，复核后可从 PROBES 移除');
+    }
     if (r.error) console.log(`            × 阶段 ${r.stage}：${r.error}`);
     for (const problem of r.problems) console.log(`            ! ${problem}`);
     if (opts.keep) console.log(`            工作区 ${r.staging} / 产物 ${r.outDir}`);
@@ -426,15 +443,17 @@ async function main() {
   console.log(`\n统计：PASS=${passCount}  DEFECT(集成缺陷)=${defectCount}  FAIL(链路故障)=${failCount}`);
   if (failCount > 0) {
     console.log(`冒烟链路故障：${results.filter((r) => !r.ok && !r.defect).map((r) => r.runtime).join(', ')}`);
-    return 1; // 链路本身坏了（引擎/留证/网络），需先修冒烟或依赖
+    return 1; // 链路本身坏了（引擎 / 留证 / 网络），先修依赖
   }
   if (defectCount > 0) {
     console.log(
-      `冒烟链路跑通，但抓到 ${defectCount} 个集成缺陷：引擎改造产物被服务端策略闸门拒绝。详见上面 DEFECT 项的 diagnostics。`
+      `冒烟链路跑通，但抓到 ${defectCount} 个集成缺陷：引擎判通过的改造产物被服务端策略闸门拒收，详见上面 DEFECT 项的 diagnostics。`
     );
     return 2; // 链路 OK，集成缺陷（预期要上报/修复）
   }
-  console.log('\n冒烟通过：三个 runtime 均完成 改造 → 确证 → 打包 → 留证 → 发布 闭环');
+  console.log(
+    `\n冒烟通过：${results.map((r) => r.runtime).join(' / ')} 均完成 改造 → 确证 → 打包 → 留证 → 发布 闭环`
+  );
   return 0;
 }
 

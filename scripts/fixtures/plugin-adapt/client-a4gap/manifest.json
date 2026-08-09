@@ -1,0 +1,5 @@
+{
+  "name": "lingfang-smoke-client-a4gap",
+  "description": "灵坊插件适配流水线 · 集成缺陷探针：硬编码第三方 base URL 放在独立 .js 里，检验「引擎 A4 改造产物 ↔ 服务端 AI 策略闸门」是否对齐。默认不跑，用 --probes 或 --only client-a4gap 触发。",
+  "runtime_type": "client"
+}
