@@ -18,7 +18,7 @@ use std::time::Duration;
 use chrono::Utc;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, JavaScriptChannelId};
 use uuid::Uuid;
 use zip::ZipArchive;
 
@@ -143,6 +143,13 @@ fn build_client() -> Result<reqwest::Client, String> {
         .map_err(|error| format!("创建 GitHub 下载客户端失败：{error}"))
 }
 
+/// 进度事件推送：仅在调用方（UI）提供 Channel 时发送；Agent 工具层可不传。
+fn emit(on_event: Option<&Channel<GitHubImportEvent>>, event: GitHubImportEvent) {
+    if let Some(channel) = on_event {
+        let _ = channel.send(event);
+    }
+}
+
 /// 流式子下载仓库 zip 到 `dest`。返回写入字节数。
 async fn fetch_repo_zip(
     client: &reqwest::Client,
@@ -150,14 +157,17 @@ async fn fetch_repo_zip(
     repo: &str,
     git_ref: &str,
     dest: &Path,
-    on_event: &Channel<GitHubImportEvent>,
+    on_event: Option<&Channel<GitHubImportEvent>>,
 ) -> Result<u64, String> {
     // 下载 URL 由白名单段拼出，主机固定为 codeload.github.com，杜绝 SSRF。
     let url = format!("https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{git_ref}");
-    let _ = on_event.send(GitHubImportEvent::Stage {
-        stage: "downloading".to_string(),
-        message: format!("正在下载 {owner}/{repo}@{git_ref}"),
-    });
+    emit(
+        on_event,
+        GitHubImportEvent::Stage {
+            stage: "downloading".to_string(),
+            message: format!("正在下载 {owner}/{repo}@{git_ref}"),
+        },
+    );
     let response = client
         .get(&url)
         .send()
@@ -168,7 +178,7 @@ async fn fetch_repo_zip(
         return Err(format!("下载仓库 zip 失败：HTTP {status}"));
     }
     let total = response.content_length();
-    let _ = on_event.send(GitHubImportEvent::Started { total_bytes: total });
+    emit(on_event, GitHubImportEvent::Started { total_bytes: total });
     let mut output = fs::File::create(dest)
         .map_err(|error| format!("创建下载暂存文件失败：{error}"))?;
     let mut stream = response.bytes_stream();
@@ -179,9 +189,12 @@ async fn fetch_repo_zip(
             .write_all(&chunk)
             .map_err(|error| format!("写入仓库 zip 失败：{error}"))?;
         written += chunk.len() as u64;
-        let _ = on_event.send(GitHubImportEvent::Progress {
-            chunk_length: chunk.len(),
-        });
+        emit(
+            on_event,
+            GitHubImportEvent::Progress {
+                chunk_length: chunk.len(),
+            },
+        );
     }
     Ok(written)
 }
@@ -304,10 +317,15 @@ fn extract_repo_zip(zip_path: &Path, dest: &Path) -> Result<usize, String> {
 /// P0 主命令：安全下载 GitHub 仓库 zip 并落盘到本地草稿工作区。
 #[tauri::command]
 pub(crate) async fn import_github_repo(
+    webview: tauri::Webview,
     manager: tauri::State<'_, PluginPackageManager>,
     input: ImportGitHubRepoInput,
-    on_event: Channel<GitHubImportEvent>,
+    // UI 传 Channel 可看进度；Agent 工具层（ImportGitHubPlugin）只要结果，允许缺省。
+    // 注：Channel 本身不实现 Deserialize，Option 只能经 JavaScriptChannelId 承接。
+    on_event: Option<JavaScriptChannelId>,
 ) -> Result<GitHubImportResult, String> {
+    let on_event: Option<Channel<GitHubImportEvent>> =
+        on_event.map(|id| id.channel_on(webview.clone()));
     let (owner, repo) = parse_owner_repo(&input.url)?;
 
     let client = build_client()?;
@@ -329,7 +347,7 @@ pub(crate) async fn import_github_repo(
     let mut chosen_branch = String::new();
     let mut last_error: Option<String> = None;
     for branch in &branches {
-        match fetch_repo_zip(&client, &owner, &repo, branch, &temp_zip, &on_event).await {
+        match fetch_repo_zip(&client, &owner, &repo, branch, &temp_zip, on_event.as_ref()).await {
             Ok(_) => {
                 chosen_branch = branch.clone();
                 break;
@@ -356,10 +374,13 @@ pub(crate) async fn import_github_repo(
     fs::create_dir_all(&dest)
         .map_err(|error| format!("创建导入目录失败：{error}"))?;
 
-    let _ = on_event.send(GitHubImportEvent::Stage {
-        stage: "extracting".to_string(),
-        message: "正在校验并解压仓库".to_string(),
-    });
+    emit(
+        on_event.as_ref(),
+        GitHubImportEvent::Stage {
+            stage: "extracting".to_string(),
+            message: "正在校验并解压仓库".to_string(),
+        },
+    );
 
     // 打开 zip，先预检（zip 炸弹），再解压。两遍都通过 by_index 随机访问完成。
     // 抽成纯函数 extract_repo_zip 以便单测覆盖 zip-slip / zip-bomb 回归用例。
@@ -371,10 +392,13 @@ pub(crate) async fn import_github_repo(
     // 下载暂存文件不再需要。
     let _ = fs::remove_file(&temp_zip);
 
-    let _ = on_event.send(GitHubImportEvent::Stage {
-        stage: "registering".to_string(),
-        message: "正在登记草稿工作区".to_string(),
-    });
+    emit(
+        on_event.as_ref(),
+        GitHubImportEvent::Stage {
+            stage: "registering".to_string(),
+            message: "正在登记草稿工作区".to_string(),
+        },
+    );
 
     // 登记草稿工作区账本条目（source_kind = ExternalTool，runtime 暂定 client，P1 会重新推导）。
     let provenance = normalize_release_provenance(
@@ -401,7 +425,7 @@ pub(crate) async fn import_github_repo(
     };
     manager.register_imported_github_workspace(&workspace)?;
 
-    let _ = on_event.send(GitHubImportEvent::Finished);
+    emit(on_event.as_ref(), GitHubImportEvent::Finished);
 
     Ok(GitHubImportResult {
         workspace_id,

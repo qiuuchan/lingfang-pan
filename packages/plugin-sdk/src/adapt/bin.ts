@@ -26,6 +26,8 @@ interface AdaptRequest {
   outDir?: string;
   /** 桌面端注入的内置运行时路径等。 */
   runtime?: RuntimeCheckOptions;
+  /** 强制重推导（GitHub 导入）：覆盖而非沿用仓库自带 manifest 的关键字段。 */
+  forceReDerive?: boolean;
 }
 
 type AdaptResponse =
@@ -75,6 +77,7 @@ async function main(): Promise<number> {
             repack: request.repack,
             outDir: request.outDir,
             runtime: request.runtime,
+            forceReDerive: request.forceReDerive,
           });
     response = { ok: true, report };
   } catch (error) {

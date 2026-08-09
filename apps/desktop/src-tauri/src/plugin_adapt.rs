@@ -65,6 +65,10 @@ pub struct RunPluginAdaptRequest {
     /// 改造产物输出目录（repack / inPlace 时用）。
     #[serde(default)]
     pub out_dir: Option<String>,
+    /// 强制重推导（GitHub 导入）：忽略仓库自带 manifest 的 runtime/entry，
+    /// 完全基于源码（package.json / 入口文件）重新合成（方案修正 4）。
+    #[serde(default)]
+    pub force_re_derive: bool,
 }
 
 fn default_mode() -> String {
@@ -140,6 +144,7 @@ fn run_plugin_adapt_blocking(
         "mode": mode,
         "pluginDir": request.plugin_dir,
         "inPlace": request.in_place,
+        "forceReDerive": request.force_re_derive,
         "execute": request.execute,
         "repack": request.repack,
         "outDir": out_dir,

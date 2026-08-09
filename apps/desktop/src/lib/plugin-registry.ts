@@ -114,6 +114,8 @@ export interface RunPluginAdaptRequest {
   /** 是否改造后重新打包成 .lfplugin（产物落临时目录，路径随 artifactPath 回传）。 */
   repack?: boolean;
   outDir?: string;
+  /** 强制重推导 runtime/entry（GitHub 导入：覆盖而非沿用仓库自带 manifest）。 */
+  forceReDerive?: boolean;
 }
 
 export interface RunPluginAdaptResponse {
@@ -267,7 +269,10 @@ export async function selectPluginDirectory(): Promise<string | null> {
  * 并（可选）重新打包成 .lfplugin。产物绝对路径随 `report.artifactPath` 回传。
  */
 export function runPluginAdapt(request: RunPluginAdaptRequest): Promise<RunPluginAdaptResponse> {
-  return tauriInvoke<RunPluginAdaptResponse>('run_plugin_adapt', request as unknown as Record<string, unknown>);
+  // Tauri 按命令参数名取值（ipc/command.rs 的 CommandItem::deserialize_json），
+  // run_plugin_adapt 的入参是 `request: RunPluginAdaptRequest`，必须嵌套；
+  // 平铺会被拒为 "missing required key request"。
+  return tauriInvoke<RunPluginAdaptResponse>('run_plugin_adapt', { request });
 }
 
 /**

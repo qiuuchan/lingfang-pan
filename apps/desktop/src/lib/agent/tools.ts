@@ -111,6 +111,8 @@ export interface AgentToolsOptions {
   getTodos: () => TodoItem[];
   /** TodoWrite 变更后同步给 UI 持久化与渲染。 */
   onTodoUpdate: (todos: TodoItem[]) => void;
+  /** GitHub 仓库经 ImportGitHubPlugin 导入为草稿插件后回调（调用方刷新草稿面板）。 */
+  onPluginImported?: (workspaceId: string, repo: string, owner: string) => void;
 }
 
 /** 团队插件精简条目（ListTeamPlugins 返回）。 */
@@ -1365,6 +1367,121 @@ export function createAgentTools(opts: AgentToolsOptions) {
     },
   });
 
+  const SearchGitHubProjects = defineTool({
+    name: 'SearchGitHubProjects',
+    description:
+      '在 GitHub 上搜索可能满足用户需求的公开仓库/项目，向用户推荐候选插件或参考实现。' +
+      '返回若干结果（标题/链接/摘要）。本工具只搜索、不下载；如需导入某个仓库为本地草稿插件，' +
+      '请改用 ImportGitHubPlugin。',
+    parameters: z.object({
+      query: z.string().min(1).describe('搜索关键词，尽量具体（如「markdown editor electron」）'),
+      // 与 WebSearch 同理：limit 宽松接收，非法/越界回落默认，永不抛错。
+      limit: z.union([z.number(), z.string(), z.null()]).optional().describe('期望结果条数，默认 8'),
+    }),
+    async execute({ query, limit }): Promise<string> {
+      const parsedLimit = (() => {
+        const n = typeof limit === 'string' ? Number(limit) : typeof limit === 'number' ? limit : NaN;
+        if (!Number.isFinite(n)) return 8;
+        return Math.min(20, Math.max(1, Math.trunc(n)));
+      })();
+      // 复用 /api/search（后端 GitHubProvider 走 stars 排序），强制限定 GitHub 站点。
+      const ghQuery = /\bsite\s*:\s*github\.com/i.test(query) ? query : `${query} site:github.com`;
+      try {
+        const resp = await api<{
+          query: string;
+          results: Array<{ title: string; url: string; snippet: string; source: string }>;
+          allSourcesFailed?: boolean;
+          sourcesSkipped?: Array<{ source: string; reason: string }>;
+        }>('/api/search', { method: 'POST', body: { query: ghQuery, limit: parsedLimit } });
+        const results = Array.isArray(resp.results) ? resp.results : [];
+        if (results.length === 0 && resp.allSourcesFailed) {
+          const skipped = Array.isArray(resp.sourcesSkipped) ? resp.sourcesSkipped : [];
+          const detail = skipped.length
+            ? `（不可达源：${skipped.slice(0, 4).map((s) => s.source).join('、')}）`
+            : '';
+          return `错误：所有搜索源当前不可达，稍后重试或联系管理员配置搜索源。${detail}`;
+        }
+        if (!results.length) return '未搜到 GitHub 仓库，可换更具体的关键词重试。';
+        return (
+          results
+            .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
+            .join('\n\n') + '\n\n（如需把某仓库导入为本地草稿插件，使用 ImportGitHubPlugin）'
+        );
+      } catch (e) {
+        return `错误：搜索失败：${(e as ApiError).message || String(e)}`;
+      }
+    },
+  });
+
+  const ImportGitHubPlugin = defineTool({
+    name: 'ImportGitHubPlugin',
+    description:
+      '把 GitHub 仓库下载、合成 manifest 并登记为本地草稿插件（三步顺序执行，不可拆分）：' +
+      '1) 安全下载仓库 zip 到本地草稿工作区（SSRF/zip 炸弹/zip-slip 由 Rust 侧把关）；' +
+      '2) 基于源码合成 manifest（覆盖而非沿用仓库自带）；' +
+      '3) 标记为草稿插件（draft 豁免）。成功后用户即可在「插件」页启动运行。' +
+      '只需提供仓库地址，无需 git clone。',
+    parameters: z.object({
+      url: z.string().min(1).describe('GitHub 仓库地址，支持 owner/repo 或完整 URL'),
+      gitRef: z
+        .string()
+        .optional()
+        .describe('可选：目标分支/标签，缺省依次尝试 main / master'),
+    }),
+    async execute({ url, gitRef }): Promise<string> {
+      // 1) 安全下载到本地草稿工作区（Rust 侧已做 SSRF/zip 炸弹/zip-slip 防护）。
+      let imported: {
+        workspaceId: string;
+        path: string;
+        owner: string;
+        repo: string;
+        gitRef: string;
+        fileCount: number;
+        sourceLabel: string;
+      };
+      try {
+        // 命令签名为 input: ImportGitHubRepoInput（camelCase）；on_event 可缺省（工具层不需进度）。
+        imported = await tauriInvoke('import_github_repo', { input: { url, gitRef } });
+      } catch (e) {
+        // 原样回显 Rust 侧错误（含安全拦截：非法地址 / 体积超限 / 路径穿越等）。
+        return `错误：下载仓库失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+      // 2) 基于源码合成 manifest（inPlace 写回工作区；forceReDerive 覆盖自带 manifest）。
+      try {
+        // 命令签名为 request: RunPluginAdaptRequest，Tauri 按参数名取值，必须嵌套在 request 下。
+        await tauriInvoke('run_plugin_adapt', {
+          request: {
+            pluginDir: imported.path,
+            inPlace: true,
+            forceReDerive: true,
+          },
+        });
+      } catch (e) {
+        return `错误：合成 manifest 失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+      // 3) 标记为草稿插件（draft 豁免，避免 fail-closed 拒绝）。
+      try {
+        await tauriInvoke('set_plugin_draft_flag', {
+          pluginId: imported.workspaceId,
+          draft: true,
+        });
+      } catch (e) {
+        return `错误：标记为草稿插件失败：${e instanceof Error ? e.message : String(e)}`;
+      }
+      // 回调刷新草稿面板（若调用方提供）。
+      try {
+        opts.onPluginImported?.(imported.workspaceId, imported.repo, imported.owner);
+      } catch {
+        /* 回调失败不阻断导入结果 */
+      }
+      return (
+        `✅ 已从 github.com/${imported.owner}/${imported.repo}@${imported.gitRef} 导入为本地草稿插件` +
+        `（${imported.fileCount} 个文件）。\n工作区：${imported.path}\n` +
+        `可在「插件」页启动运行；如需修改源码，用 Edit/Write 工具基于该工作区编辑。`
+      );
+    },
+  });
+
   return {
     tools: [
       Read,
@@ -1376,6 +1493,8 @@ export function createAgentTools(opts: AgentToolsOptions) {
       Check,
       WebSearch,
       ListTeamPlugins,
+      SearchGitHubProjects,
+      ImportGitHubPlugin,
       AskQuestion,
       TodoWrite,
       DateTime,

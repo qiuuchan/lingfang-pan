@@ -1172,6 +1172,23 @@ export function CreatorWorkspace({ onClose }: { onClose: () => void }) {
         onAskQuestion,
         getTodos: () => todos,
         onTodoUpdate: (next) => setTodos(next.map((t) => ({ ...t }))),
+        onPluginImported: (workspaceId) => {
+          const store = usePluginCreatorStore.getState();
+          // 先把导入工作区绑定为当前草稿（占位），再从磁盘权威重载，
+          // 展示 adapt 合成后的 manifest 与源码，刷新右侧草稿面板。
+          store.createPlugin(workspaceId, {
+            id: workspaceId,
+            name: workspaceId,
+            version: '0.1.0',
+            description: '',
+            runtime_type: 'client',
+            entry: '',
+            visibility: 'private',
+            capabilities: [],
+            files: [],
+          });
+          void store.refreshDraft();
+        },
       });
       resetReadTracking();
 

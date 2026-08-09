@@ -11,6 +11,7 @@ export interface AdaptCliOptions {
   repack?: boolean;
   out?: string;
   inPlace?: boolean;
+  forceReDerive?: boolean;
   json?: boolean;
 }
 
@@ -33,6 +34,7 @@ export async function adaptCommand(_argv: string[], opts?: AdaptCliOptions): Pro
     repack: opts?.repack === true,
     outDir: opts?.out ? path.resolve(opts.out) : undefined,
     inPlace: opts?.inPlace === true,
+    forceReDerive: opts?.forceReDerive === true,
   };
 
   try {

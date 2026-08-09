@@ -937,3 +937,82 @@ describe('detectCapabilities 能力声明检测', () => {
     expect(r.detected).toContain('fs.read');
   });
 });
+
+describe('ImportGitHubPlugin 工具', () => {
+  const imported = {
+    workspaceId: '33333333-3333-4333-8333-333333333333',
+    path: 'D:/plugins/workspaces/33333333-3333-4333-8333-333333333333',
+    owner: 'acme',
+    repo: 'demo',
+    gitRef: 'main',
+    fileCount: 12,
+    sourceLabel: 'github.com/acme/demo@main',
+  };
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('三步顺序执行（下载 → 合成清单 → 标记草稿），入参形状与 Tauri 命令签名一致', async () => {
+    tauriInvokeMock.mockImplementation(async (command: string) =>
+      command === 'import_github_repo' ? imported : undefined
+    );
+    const { opts } = makeOpts();
+    opts.onPluginImported = vi.fn();
+
+    const out = await callExecute(createAgentTools(opts).tools, 'ImportGitHubPlugin', {
+      url: 'https://github.com/acme/demo',
+    });
+
+    // staged gate：顺序不可乱，缺一步都会让草稿处于半成品状态。
+    expect(tauriInvokeMock.mock.calls.map(([command]) => command)).toEqual([
+      'import_github_repo',
+      'run_plugin_adapt',
+      'set_plugin_draft_flag',
+    ]);
+    // Tauri 按命令参数名取值：结构体参数必须嵌套在 input / request 下，平铺会被拒。
+    expect(tauriInvokeMock.mock.calls[0]?.[1]).toEqual({
+      input: { url: 'https://github.com/acme/demo', gitRef: undefined },
+    });
+    expect(tauriInvokeMock.mock.calls[1]?.[1]).toEqual({
+      request: { pluginDir: imported.path, inPlace: true, forceReDerive: true },
+    });
+    expect(tauriInvokeMock.mock.calls[2]?.[1]).toEqual({
+      pluginId: imported.workspaceId,
+      draft: true,
+    });
+    expect(opts.onPluginImported).toHaveBeenCalledWith(imported.workspaceId, 'demo', 'acme');
+    expect(out).toContain('acme/demo@main');
+  });
+
+  it('下载被安全闸拦截 → 原样回显 Rust 错误并且不再往下走', async () => {
+    tauriInvokeMock.mockRejectedValueOnce(new Error('仅支持 github.com / codeload.github.com'));
+    const { opts } = makeOpts();
+
+    const out = await callExecute(createAgentTools(opts).tools, 'ImportGitHubPlugin', {
+      url: 'https://evil.example.com/acme/demo',
+    });
+
+    expect(out).toContain('仅支持 github.com / codeload.github.com');
+    expect(tauriInvokeMock.mock.calls.map(([command]) => command)).toEqual(['import_github_repo']);
+  });
+
+  it('清单合成失败 → 回显错误且不标记草稿', async () => {
+    tauriInvokeMock.mockImplementation(async (command: string) => {
+      if (command === 'import_github_repo') return imported;
+      if (command === 'run_plugin_adapt') throw new Error('未找到内置适配引擎 adapt.mjs');
+      return undefined;
+    });
+    const { opts } = makeOpts();
+
+    const out = await callExecute(createAgentTools(opts).tools, 'ImportGitHubPlugin', {
+      url: 'acme/demo',
+    });
+
+    expect(out).toContain('未找到内置适配引擎 adapt.mjs');
+    expect(tauriInvokeMock.mock.calls.map(([command]) => command)).toEqual([
+      'import_github_repo',
+      'run_plugin_adapt',
+    ]);
+  });
+});
