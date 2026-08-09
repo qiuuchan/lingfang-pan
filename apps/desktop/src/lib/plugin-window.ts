@@ -42,7 +42,9 @@ export async function openPluginInWindow(plugin: LoadedPlugin): Promise<void> {
   }
 
   const title = `${plugin.name} — 灵坊`;
-  // 用户代理分区的 webview 共享主窗口的 localStorage（同源），session token 可用。
+  // P1-1（M-1 完整版）：standalone 插件窗口使用独立隔离存储（incognito = 非持久化 DataStore），
+  // 与主窗口不共享 localStorage——即使有 XSS / 被攻陷插件，也无法从宿主 localStorage 读到 JWT。
+  // 窗口内 App 仍通过 Rust read_auth_token 在内存中恢复 token（插件运行在 sandbox iframe，读不到）。
   try {
     const webview = new WebviewWindow(label, {
       url,
@@ -53,6 +55,7 @@ export async function openPluginInWindow(plugin: LoadedPlugin): Promise<void> {
       minHeight: 360,
       resizable: true,
       decorations: true,
+      incognito: true,
     });
     // 监听创建错误事件（WebviewWindow 构造不抛同步异常，能力缺失/URL 非法通过 error 事件上报）。
     // once 创建后即解绑，不长期占用。

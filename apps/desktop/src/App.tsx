@@ -262,10 +262,14 @@ const emptySession: Session = {
   permissions: [],
 };
 
-const SESSION_STORAGE_KEY = 'lf:session';
+// P1-1（M-1 完整版）：会话（含 JWT）不再持久化到 localStorage。
+// 此前完整 Session（含 JWT 明文）写在 localStorage['lf:session']，standalone 插件窗口与主窗口同源
+// 共享同一 localStorage，被攻陷插件 / XSS 可读取宿主 JWT。现在 Session 仅存内存，JWT 的唯一持久
+// 副本在 Rust 侧 app_data/session.json（C1 persist_auth_token），启动时由 restoreTokenFromHost
+// 恢复，再经 /api/auth/me 重建完整 Session。standalone 窗口因此拿不到宿主 localStorage 中的 JWT。
 
-// DESK-SHELL-04 修复：localStorage 配额满 / 被禁用时统一提示，避免「持久化静默失败、
-// 重启后丢失登录态/固定插件」无任何线索。仅在失败后提示一次（节流），避免刷屏。
+// DESK-SHELL-04 修复：localStorage 配额满 / 被禁用时的统一提示（固定插件 / 最近使用等 UI 偏好持久化失败时报错）。
+// 仅提示一次（节流），避免刷屏。注意：会话本身已不写 localStorage（见上方 P1-1 说明）。
 let persistenceErrorReported = false;
 function reportPersistenceFailure(err: unknown) {
   if (persistenceErrorReported) return;
@@ -287,29 +291,15 @@ function reportPersistenceFailure(err: unknown) {
 }
 
 function loadStoredSession(): Session | null {
-  try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Session;
-    return parsed && parsed.token ? parsed : null;
-  } catch {
-    return null;
-  }
+  // 不再从 localStorage 读取（见上方说明）。返回 null 时 App 初始态为空，
+  // 由 restoreTokenFromHost + /api/auth/me 异步恢复会话。
+  return null;
 }
-function saveStoredSession(session: Session) {
-  try {
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-  } catch (err) {
-    // DESK-SHELL-04 修复：配额满 / localStorage 被禁用时不再静默吞错。
-    reportPersistenceFailure(err);
-  }
+function saveStoredSession(_session: Session) {
+  // P1-1：无 localStorage 持久化（token/JWT 已移出 localStorage）。
 }
 function clearStoredSession() {
-  try {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    /* localStorage 不可用则忽略 */
-  }
+  // P1-1：无 localStorage 持久化。登出时 token 由 setAuthToken(null) → persist_auth_token(null) 清 Rust 副本。
 }
 
 function sessionFromPayload(payload: CollabSessionResponse, previousToken: string | null): Session {

@@ -10,7 +10,7 @@
 // - 缓存 5 分钟：models 端点变化频率低（管理员调渠道/定价才变），避免每次对话都拉。
 // - 登录态变化刷新：setAuthToken 后下次调用自动失效重拉（因 Authorization 头变了，缓存按 token 前缀失效）。
 // - 容错：拉取失败或后端未返回 contextWindow（null）→ 保守默认值，不阻断对话。
-import { api } from '@/lib/api';
+import { api, getAuthToken } from '@/lib/api';
 
 /** 后端返回的 tier 模型元信息（relay listModels data 项的子集）。 */
 interface RelayModelInfo {
@@ -48,9 +48,10 @@ let cache: CacheEntry | null = null;
 
 /** 取当前 token 的指纹（前 16 字符）用于缓存失效判定，避免读到上一个登录用户的窗口。 */
 function tokenFingerprint(): string {
-  // 直接读 localStorage（与 api.ts 的存储一致），避免本文件依赖 getAuthToken 内部状态。
+  // P1-1：token 已移出 localStorage，改从 api.ts 的内存态读取（与 setAuthToken 单一真相源一致）。
+  // 仍取前 16 字符做缓存失效判定，避免读到上一个登录用户的窗口。
   try {
-    const t = typeof window !== 'undefined' ? window.localStorage.getItem('lf:authToken') : null;
+    const t = getAuthToken();
     return t ? t.slice(0, 16) : 'no-auth';
   } catch {
     return 'no-auth';

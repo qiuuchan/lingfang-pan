@@ -1,5 +1,4 @@
 const BACKEND_URL_STORAGE_KEY = 'lf:backendUrl';
-const AUTH_TOKEN_STORAGE_KEY = 'lf:authToken';
 
 // 后端地址写死：始终使用正式域名，不允许用户/缓存/app.config 覆盖。
 // configureApiBase / clearApiBase / initApiBase 均忽略入参与已存旧值，强制回归此地址。
@@ -94,28 +93,20 @@ export async function testBackendUrl(url: string): Promise<void> {
 let authToken: string | null = null;
 export function setAuthToken(t: string | null) {
   authToken = t;
-  try {
-    if (t) localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, t);
-    else localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-  } catch {
-    /* localStorage 不可用则只更新当前会话 */
-  }
-  // C1（H-6 修复配套）：token 同步落 Rust 侧文件（app_data/session.json），
-  // 与 localStorage 解耦——localStorage 被清空/禁用后重启仍可免重登。
+  // P1-1（M-1 完整版）：JWT 不再写入 localStorage——任何同源 webview（含 standalone 插件窗口）
+  // 都无法从 localStorage 读取宿主会话令牌。token 的唯一可信持久副本在 Rust 侧 session.json
+  // （persistAuthTokenToHost），启动时由 restoreTokenFromHost 从 Rust 恢复；内存态由本函数维护。
   // fire-and-forget：写失败（网页预览/旧壳无命令）静默降级到内存会话，不影响登录。
   void persistAuthTokenToHost(t);
 }
 export function getAuthToken() {
   return authToken;
 }
+// P1-1：不再从 localStorage 读取（JWT 已移出 localStorage）。内存 token 由 setAuthToken 维护，
+// 跨重启恢复走 restoreTokenFromHost（Rust session.json）。此处仅返回当前内存态（通常为 null，
+// 待 restoreTokenFromHost 异步注入后再用于启动静默刷新）。
 export function initAuthToken(): string | null {
-  try {
-    const stored = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-    if (stored) authToken = stored;
-    return authToken;
-  } catch {
-    return null;
-  }
+  return authToken;
 }
 
 // C1：把 token 写入 Rust 侧（webview 之外的宿主文件）。网页预览环境无 Tauri 命令 → 静默跳过。
@@ -128,9 +119,10 @@ async function persistAuthTokenToHost(token: string | null): Promise<void> {
 }
 
 /**
- * C1：启动恢复——从 Rust 侧文件读取上次持久化的 token。
- * 仅当 localStorage 无 token 时生效（localStorage 存在则以其为准，host 是兜底副本）；
- * 命中后写回 localStorage + 内存，供 App 启动流静默刷新会话。
+ * C1 + P1-1：从 Rust 侧文件读取上次持久化的 token，恢复到【内存】。
+ * 注意：命中后【不写回 localStorage】——否则会把 JWT 落回可被同源 webview（含 standalone 插件窗口）
+ * 读取的 localStorage，前功尽弃。内存态由 authToken 持有，供 api() 注入 Authorization 头；
+ * 启动流再由 App.tsx 的 restore effect 走 /api/auth/me 重建完整 Session。
  */
 export async function restoreTokenFromHost(): Promise<string | null> {
   let token: string | null = null;
@@ -140,13 +132,6 @@ export async function restoreTokenFromHost(): Promise<string | null> {
     return null; // 非桌面环境/旧壳：无 host 副本
   }
   if (!token) return null;
-  try {
-    if (!localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)) {
-      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
-    }
-  } catch {
-    /* localStorage 不可用：host 内存即最终状态 */
-  }
   authToken = token;
   return token;
 }

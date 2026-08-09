@@ -26,13 +26,8 @@ class RootErrorBoundary extends React.Component<
   }
 
   handleReset = () => {
-    // 清掉可能损坏的本地状态（lf:session / lf:authToken），再整页 reload 回到 Auth。
-    try {
-      localStorage.removeItem('lf:session');
-      localStorage.removeItem('lf:authToken');
-    } catch {
-      /* localStorage 不可用则忽略 */
-    }
+    // P1-1：会话已移出 localStorage（仅存内存 + Rust session.json）。
+    // 重置即清内存态并重载；Rust session.json 由登出流程的 persist_auth_token(null) 清理。
     window.location.reload();
   };
 
