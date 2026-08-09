@@ -1,11 +1,9 @@
-use std::process::{Child, Command};
+use std::process::Child;
 
+// `Command`/`Stdio` 仅用于 Unix 分支的 `kill -TERM/-KILL`；Windows 走 `windows_sys`，不引用它们。
+// `CommandExt` 原先仅供 `prepare_process_group`（已并入 guarded_spawn）使用，移除该封装后不再需要。
 #[cfg(unix)]
-use std::os::unix::process::CommandExt;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-#[cfg(unix)]
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 
 pub(crate) fn kill_child_tree(child: &Child) {
     #[cfg(unix)]
@@ -33,24 +31,11 @@ pub(crate) fn kill_child_tree(child: &Child) {
     }
 }
 
-pub(crate) fn prepare_process_group(command: &mut Command) {
-    #[cfg(unix)]
-    unsafe {
-        command.pre_exec(|| {
-            libc_setsid();
-            Ok(())
-        });
-    }
-    #[cfg(windows)]
-    {
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
-    }
-}
+// 注：`prepare_process_group`（原 CREATE_NEW_PROCESS_GROUP / CREATE_NO_WINDOW / setsid 封装）
+// 已被 `guarded_spawn::GuardedCommand` 统一吸收（P1-3 Step 0），此处不再保留。
 
 #[cfg(unix)]
-fn libc_setsid() {
+pub(super) fn libc_setsid() {
     extern "C" {
         fn setsid() -> i32;
     }

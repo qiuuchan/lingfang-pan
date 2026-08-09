@@ -42,7 +42,8 @@ use serde::{Deserialize, Serialize};
 // - kill_child_tree：杀整个进程组/树（含孙进程），供 stop_plugin 复用。
 // - minimal_env 不复用 plugin_script.rs 的 pub(crate)（保持组B 自洽，独立构造同款白名单）。
 use crate::process_util::{
-    kill_child_tree, run_capture_with_env, run_streamed_with_env, CapturedOutput, SandboxHandle,
+    kill_child_tree, run_capture_with_env, run_streamed_with_env, CapturedOutput, GuardedChild,
+    GuardedCommand, SandboxHandle, SandboxPolicy, SandboxTier,
 };
 use crate::runtime_resolver::RuntimeResolver;
 // 复用组A plugin_store.rs 的 PluginStore（plugins_root 解析 + ensure_plugin_dir + sanitize_plugin_id）。
@@ -1507,7 +1508,10 @@ pub(crate) fn start_plugin_from_dir(
     })?;
     // M-3/P1-2：组A 目录直启通道统一强制签名（草稿豁免）。
     // 不在 plugins_root 的目录视为官方内置 bundle（注册时已鉴权），跳过强制。
-    {
+    //
+    // P1-3：同一处判定顺带定出沙箱档位——「是否在 plugins_root」是唯一不可被插件自述
+    // 篡改的来源信号，故直接复用，不新增任何 manifest 契约。
+    let sandbox_tier = {
         use tauri::Manager;
         let store = app.state::<PluginStore>();
         let root = store.plugins_root();
@@ -1519,10 +1523,12 @@ pub(crate) fn start_plugin_from_dir(
                     e
                 },
             )?;
+            SandboxTier::UserInstalled
         } else {
             log_launch("插件目录不在 plugins_root（内置 bundle），跳过签名强制".to_string());
+            SandboxTier::Builtin
         }
-    }
+    };
     log_launch(format!(
         "manifest: runtime={:?} entry={}",
         manifest.runtime, manifest.entry
@@ -1690,52 +1696,24 @@ pub(crate) fn start_plugin_from_dir(
         .collect();
     log_launch(format!("spawn：{cmdline_str}"));
 
-    // 直接 spawn 入口进程（跨平台）：stdout+stderr 都 piped，逐行 emit plugin:output 到前端日志面板。
-    let mut command = std::process::Command::new(&binary);
-    command
-        .current_dir(&plugin_dir)
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env_clear()
-        .envs(env);
-    // Unix：setsid 做进程组分离（stop kill 用）。Windows：CREATE_NEW_PROCESS_GROUP 同理。
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        unsafe {
-            command.pre_exec(|| {
-                libc_setsid();
-                Ok(())
-            });
-        }
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NEW_PROCESS_GROUP（0x0200）：进程组隔离，便于 stop_plugin kill 整组。
-        command.creation_flags(0x0000_0200);
-    }
-    let mut child = command.spawn().map_err(|e| {
-        log_launch(format!("spawn 失败：{e}"));
-        if let Some(token) = bridge_token.as_deref() {
-            bridge.revoke_token(token);
-        }
-        format!("启动插件进程失败：{e}")
-    })?;
-
-    // OS 级沙箱（Windows Job Object）：进程树围栏 + 关闭即杀。
-    // 沙箱是安全网：即使 kill_child_tree 漏杀孙进程，Job 句柄关闭也会清理整棵进程树。
-    // 创建/分配失败不阻断启动（降级到仅 kill_child_tree + CREATE_NEW_PROCESS_GROUP 隔离）。
-    let sandbox = SandboxHandle::create().unwrap_or_else(|e| {
-        log_launch(format!("沙箱创建失败（降级为无沙箱）：{e}"));
-        SandboxHandle::default()
-    });
-    if let Err(e) = sandbox.assign_process(&child) {
-        log_launch(format!("沙箱分配进程失败（降级为无沙箱）：{e}"));
-    }
-    log_launch("OS 级沙箱已就绪".to_string());
+    // spawn 入口进程：统一走 process_util::GuardedCommand（P1-3 Step 0/1）。
+    // 它负责挂起态起进程 → 建 Job（围栏 + 资源配额 + UI 限制）→ 入 Job → 放行，
+    // 保证插件在被围栏之前一条用户指令都没执行（消除 R4 竞态）。
+    // stdout+stderr 都 piped，逐行 emit plugin:output 到前端日志面板。
+    let GuardedChild {
+        mut child,
+        sandbox,
+    } = GuardedCommand::new(&binary, args.clone(), SandboxPolicy::plugin_entry(sandbox_tier))
+        .cwd(&plugin_dir)
+        .env_exact(env)
+        .spawn(|message| log_launch(message))
+        .map_err(|e| {
+            log_launch(format!("spawn 失败：{e}"));
+            if let Some(token) = bridge_token.as_deref() {
+                bridge.revoke_token(token);
+            }
+            format!("启动插件进程失败：{e}")
+        })?;
 
     // 取出 stdout/stderr pipe，开两个 reader 线程逐行 emit plugin:output（实时流到前端日志面板）。
     // 同时累积 stderr 到共享缓冲，供 800ms 秒退时的崩溃诊断读全文。

@@ -1,13 +1,12 @@
 use std::ffi::OsString;
 use std::io::BufRead;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use super::binary::build_spawn_command;
-use super::tree::{kill_child_tree, prepare_process_group};
+use super::guarded_spawn::{GuardedChild, GuardedCommand, SandboxPolicy};
+use super::tree::kill_child_tree;
 
 #[derive(Debug, Clone)]
 pub(crate) struct CapturedOutput {
@@ -25,25 +24,16 @@ pub(crate) fn run_captured_inner(
     timeout_ms: u64,
     env: Option<&[(OsString, OsString)]>,
 ) -> Result<CapturedOutput, String> {
-    let mut command = build_spawn_command(binary, &args);
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(workspace_dir) = workspace_dir {
-        command.current_dir(workspace_dir);
-    }
-    if let Some(env) = env {
-        command
-            .env_clear()
-            .envs(env.iter().map(|(key, value)| (key.clone(), value.clone())));
-    }
-    prepare_process_group(&mut command);
-    wait_for_capture(
-        command.spawn().map_err(|error| error.to_string())?,
-        timeout_ms,
-        None,
-    )
+    // 工具链通道（venv/pip/pnpm/探测/脚本预览）目前用 exempt 策略：不建 Job，行为与加固前一致。
+    // 逐通道换成真实策略见 P1-3 计划 Step 6。
+    let GuardedChild { child, sandbox } =
+        GuardedCommand::new(binary, args, SandboxPolicy::exempt())
+            .cwd_opt(workspace_dir)
+            .env_exact_opt(env.map(|env| env.to_vec()))
+            .spawn(|_| {})?;
+    let captured = wait_for_capture(child, timeout_ms, None);
+    drop(sandbox);
+    captured
 }
 
 pub(crate) fn run_capture_with_env(
@@ -64,23 +54,14 @@ pub(crate) fn run_capture_with_env_and_cancel(
     env: Vec<(OsString, OsString)>,
     cancel: &AtomicBool,
 ) -> Result<CapturedOutput, String> {
-    let mut command = build_spawn_command(binary, &args);
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(workspace_dir) = workspace_dir {
-        command.current_dir(workspace_dir);
-    }
-    command
-        .env_clear()
-        .envs(env.iter().map(|(key, value)| (key.clone(), value.clone())));
-    prepare_process_group(&mut command);
-    wait_for_capture(
-        command.spawn().map_err(|error| error.to_string())?,
-        timeout_ms,
-        Some(cancel),
-    )
+    let GuardedChild { child, sandbox } =
+        GuardedCommand::new(binary, args, SandboxPolicy::exempt())
+            .cwd_opt(workspace_dir)
+            .env_exact(env)
+            .spawn(|_| {})?;
+    let captured = wait_for_capture(child, timeout_ms, Some(cancel));
+    drop(sandbox);
+    captured
 }
 
 /// 流式运行子进程：stdout/stderr 逐行回调 + 主线程轮询等退出 + 超时 kill。
@@ -101,20 +82,13 @@ pub(crate) fn run_streamed_with_env<F>(
 where
     F: FnMut(&str, bool) + Send + 'static,
 {
-    let mut command = build_spawn_command(binary, &args);
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(workspace_dir) = workspace_dir {
-        command.current_dir(workspace_dir);
-    }
-    command
-        .env_clear()
-        .envs(env.iter().map(|(key, value)| (key.clone(), value.clone())));
-    prepare_process_group(&mut command);
-
-    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let GuardedChild {
+        mut child,
+        sandbox,
+    } = GuardedCommand::new(binary, args, SandboxPolicy::exempt())
+        .cwd_opt(workspace_dir)
+        .env_exact(env)
+        .spawn(|_| {})?;
 
     // 逐行读 stdout/stderr 的回调经 Arc<Mutex> 共享给两个 reader 线程（on_line 可能非 Sync）。
     let on_line = Arc::new(Mutex::new(on_line));
@@ -191,6 +165,8 @@ where
     let exit_code = child.wait().ok().and_then(|s| s.code());
     let stdout = stdout_buf.lock().map(|b| b.clone()).unwrap_or_default();
     let stderr = stderr_buf.lock().map(|b| b.clone()).unwrap_or_default();
+    // 沙箱句柄活到进程收敛之后再 drop（exempt 时为空句柄，no-op）。
+    drop(sandbox);
 
     Ok(CapturedOutput {
         stdout,
