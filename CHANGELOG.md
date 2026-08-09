@@ -2,6 +2,13 @@
 
 本文件记录灵方桌面端面向用户的版本变更。
 
+## v0.1.12 · unreleased
+
+### 改进
+
+- **内置计算器零依赖改造**：`builtin.calculator` 从 PySide6（首次运行需联网 pip 安装约 80MB）改为 Tkinter（Python 标准库），全新电脑下载即开箱即跑，无需网络与第三方依赖。
+- **内置插件离线契约**：新增 `verify-builtin-plugins.mjs`（`pnpm verify:builtin`），校验全部 5 个内置插件满足离线可运行契约（合法 manifest、入口存在、零第三方依赖、语法通过、LLM 调用有错误兜底），并接入 `verify-all.mjs` 防止回归。
+
 ## v0.1.11 · 2026-07-31
 
 本版本随 RBFLow 可靠性与多账号改造，升级平台桥（plugin_llm_bridge）对 RBFLow 任务状态的透传，配合后端多账号池/插件新行为。

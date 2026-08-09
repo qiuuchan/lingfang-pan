@@ -29,6 +29,7 @@
     "plugin:validate": "pnpm -C packages/plugin-sdk exec lingfang-plugin validate",
     "plugin:build": "pnpm -C packages/plugin-sdk exec lingfang-plugin build",
     "plugin:publish": "pnpm -C packages/plugin-sdk exec lingfang-plugin publish",
+    "verify:builtin": "node scripts/verify-builtin-plugins.mjs",
     "version:sync": "node scripts/sync-version.mjs",
     "version:bump": "node scripts/sync-version.mjs",
     "prebuild": "node scripts/sync-version.mjs",

@@ -139,7 +139,11 @@ pnpm plugin:publish .\demo `
 | `game-2048`         | `builtin.game-2048`         | 2048 小游戏    | nodejs |
 | `notes`             | `builtin.notes`             | Markdown 笔记  | client |
 
-`plugins/` 还包含 summarizer、detail-poster、outfit-batch、rbflow-video 等可发布插件源码。
+`plugins/` 还包含 summarizer、detail-poster、outfit-batch、qianniu-panel、rbflow-video 等可发布插件源码。
+
+内置插件遵循**离线契约**：零第三方依赖、开箱即跑（全新电脑下载即用，无需联网安装）。该契约由 `pnpm verify:builtin` 持续校验。
+
+内置插件遵循**离线契约**：零第三方依赖、开箱即跑（全新电脑无需联网安装）。该契约由 `pnpm verify:builtin` 持续校验。
 
 ## 常用命令
 

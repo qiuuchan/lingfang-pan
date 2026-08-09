@@ -8,6 +8,7 @@ const jobs = [
   { name: '基础健康检查(鉴权/RBAC/平台信息)', file: 'scripts/smoke.mjs' },
   { name: '插件发布价值链(发布→上架)', file: 'scripts/plugin-lifecycle-smoke.mjs' },
   { name: '灵石计费购买链路(跨团队购买→扣费)', file: 'scripts/marketplace-billing-smoke.mjs' },
+  { name: '内置插件离线契约(开箱即跑)', file: 'scripts/verify-builtin-plugins.mjs' },
 ];
 
 let pass = 0;
