@@ -305,3 +305,52 @@ describe('validateWorkspace manifest 缺失', () => {
     expect(issues.some((i) => i.code === 'leaked_openai_key')).toBe(true);
   });
 });
+
+describe('P3 A2 入口候选探测（空壳防护）', () => {
+  // GitHub 导入的仓库极少把入口放在 index.js / main.py。若直接生成骨架，桌面端
+  // start_plugin 的入口存在性校验会通过、进程也拉得起来，但跑的是空壳——
+  // 表现为「启动成功却什么都没发生」，比直接报错更难排查。故缺失默认入口时
+  // 先在仓库内找真实入口，找不到才生成骨架。
+
+  it('nodejs 真实入口在 src/server.js（无 index.js）时指向它而非生成空壳', async () => {
+    const dir = makePlugin({
+      'package.json': JSON.stringify({ name: 'svc', scripts: { start: 'node src/server.js' } }),
+      'src/server.js': "console.log('real server');",
+    });
+    const result = await runAdaptation({ pluginDir: dir, forceReDerive: true });
+    const syn = JSON.parse(readFileSync(join(result.workspaceDir, 'manifest.json'), 'utf-8'));
+    expect(syn.runtime_type).toBe('nodejs');
+    expect(syn.entry).toBe('src/server.js');
+    // 关键：不应生成空壳 index.js（否则桌面端会「启动成功但什么都没发生」）。
+    expect(existsSync(join(result.workspaceDir, 'index.js'))).toBe(false);
+    expect(result.fixesApplied.some((f) => f.code === 'A2_entry_default')).toBe(true);
+  });
+
+  it('python 入口缺失但 src/main.py 存在时指向真实入口（不生成骨架）', () => {
+    const dir = makePlugin({ 'src/main.py': 'print(1)' });
+    const ws = new AdaptWorkspace(dir);
+    const manifest = {
+      id: 'x',
+      name: 'x',
+      version: '0.1.0',
+      runtime_type: 'python',
+      entry: 'main.py',
+      capabilities: [],
+    } as Record<string, unknown>;
+    transformEntry(ws, manifest);
+    expect(manifest.entry).toBe('src/main.py');
+    expect(existsSync(join(dir, 'main.py'))).toBe(false);
+  });
+
+  it('仓库内确实没有任何入口时才生成最小骨架', async () => {
+    const dir = makePlugin({
+      'package.json': JSON.stringify({ name: 'empty', scripts: { start: 'node nothing.js' } }),
+      'README.md': '# no entry here',
+    });
+    const result = await runAdaptation({ pluginDir: dir, forceReDerive: true });
+    const syn = JSON.parse(readFileSync(join(result.workspaceDir, 'manifest.json'), 'utf-8'));
+    expect(syn.entry).toBe('index.js');
+    expect(existsSync(join(result.workspaceDir, 'index.js'))).toBe(true);
+    expect(result.fixesApplied.some((f) => f.code === 'A2_entry_skeleton')).toBe(true);
+  });
+});

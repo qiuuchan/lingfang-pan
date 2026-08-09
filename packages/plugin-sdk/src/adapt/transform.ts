@@ -18,6 +18,48 @@ const RUNTIME_ENTRY_EXT: Record<string, string[]> = {
   nodejs: ['.js', '.mjs', '.cjs'],
   python: ['.py'],
 };
+/**
+ * 入口候选（按优先级）。默认入口不存在时先在仓库里找真实入口，找不到才生成骨架。
+ *
+ * 动机：GitHub 导入的仓库极少把入口放在 `index.js` / `main.py`。若直接生成骨架，
+ * 桌面端 start_plugin 的入口存在性校验会通过、进程也拉得起来，但跑的是
+ * `console.log('plugin started')` 空壳——表现为「启动成功却什么都没发生」，
+ * 比直接报错更难排查。
+ */
+const RUNTIME_ENTRY_CANDIDATES: Record<string, string[]> = {
+  client: ['ui/index.html', 'index.html', 'public/index.html', 'dist/index.html', 'src/index.html'],
+  nodejs: [
+    'index.js',
+    'server.js',
+    'app.js',
+    'main.js',
+    'index.mjs',
+    'index.cjs',
+    'src/index.js',
+    'src/main.js',
+    'src/server.js',
+    'src/app.js',
+    'dist/index.js',
+  ],
+  python: ['main.py', 'app.py', '__main__.py', 'src/main.py', 'src/app.py'],
+};
+
+/** 在工作区内定位真实存在的入口：Node 优先信 package.json.main，其次按候选表探测。 */
+function findExistingEntry(ws: AdaptWorkspace, rt: string): string | null {
+  if (rt === 'nodejs') {
+    const pkgRaw = ws.readFile('package.json');
+    if (pkgRaw != null) {
+      try {
+        const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
+        const main = typeof pkg.main === 'string' ? pkg.main.replace(/^\.\//, '').trim() : '';
+        if (main && ws.exists(main)) return main;
+      } catch {
+        // 损坏 package.json 忽略，回退候选表探测。
+      }
+    }
+  }
+  return (RUNTIME_ENTRY_CANDIDATES[rt] ?? []).find((candidate) => ws.exists(candidate)) ?? null;
+}
 
 function slugFromName(name: string): string {
   let s = name
@@ -141,13 +183,13 @@ export function transformEntry(ws: AdaptWorkspace, manifest: Record<string, unkn
       }
     }
   } else {
-    // 文件不存在：先尝试工作区内是否存在默认候选
-    const def = RUNTIME_ENTRY_DEFAULT[rt];
-    if (def && ws.exists(def)) {
+    // 文件不存在：先在工作区内找真实入口（package.json.main / 候选表），找到就指过去。
+    const found = findExistingEntry(ws, rt);
+    if (found) {
       const before = entry;
-      entry = def;
+      entry = found;
       manifest.entry = entry;
-      fixes.push({ code: 'A2_entry_default', category: 'runtime', message: `入口缺失，指向默认 ${def}`, path: 'entry', diff: { before, after: def } });
+      fixes.push({ code: 'A2_entry_default', category: 'runtime', message: `入口缺失，指向仓库内真实入口 ${found}`, path: 'entry', diff: { before, after: found } });
     } else {
       // 生成最小骨架，使 runtime-check 能继续执行
       const skeleton = skeletonFor(rt);

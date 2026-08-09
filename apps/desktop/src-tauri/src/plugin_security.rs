@@ -604,4 +604,47 @@ mod tests {
         let info = check_plugin_recall(&store, "any", "1.0.0");
         assert!(!info.recalled);
     }
+
+    /// P3 闭环：GitHub 导入的草稿工作区（workspaces/<uuid>）经 `set_draft_flag(uuid, true)`
+    /// 写入框架侧 attestation 基线后，在启动链路（`require_signed=true`）应被签名门禁按草稿
+    /// 豁免放行——证明 imported draft workspace 能被 startPlugin 正常 launch（而非仅"落盘成功"）。
+    #[test]
+    fn imported_workspace_draft_exempts_at_launch() {
+        let store = temp_store("p3-ws-launch");
+        let ws_id = "ws-imported-0001";
+        // import_github_repo → run_plugin_adapt(inPlace) 合成的 manifest 落在 workspaces/<uuid>。
+        let ws_dir = store.plugins_root().join("workspaces").join(ws_id);
+        std::fs::create_dir_all(&ws_dir).unwrap();
+        std::fs::write(
+            ws_dir.join("manifest.json"),
+            r#"{"id":"some-id","name":"Imported","runtime_type":"nodejs","entry":"index.js","draft":true}"#,
+        )
+        .unwrap();
+        // P2 Step 3：写入 attestation 基线（draft:true），模拟导入完成时落地的身份标记。
+        store.set_draft_flag(ws_id, true).unwrap();
+        // 启动链路解析到的必须是 workspaces 工作区目录（与 plugin_dir 优先解析一致）。
+        let resolved = store.plugin_dir(ws_id).unwrap();
+        assert_eq!(resolved, ws_dir, "启动应解析到 workspaces 工作区目录");
+        // 启动链路强制签名门禁（require_signed=true）：导入草稿应被豁免放行。
+        enforce_signature_gate(&store.plugins_root(), &resolved, true).unwrap();
+    }
+
+    /// 反向护栏：未走授权通路（没有 attestation 基线）的、自述 draft:true 的工作区，
+    /// 在远端式启动链路（require_signed=true）必须被拦截——防止"任意仓库自称草稿绕过签名"。
+    #[test]
+    fn unbaselined_draft_workspace_rejected_at_launch() {
+        let store = temp_store("p3-ws-no-baseline");
+        let ws_id = "ws-unmarked-0002";
+        let ws_dir = store.plugins_root().join("workspaces").join(ws_id);
+        std::fs::create_dir_all(&ws_dir).unwrap();
+        std::fs::write(
+            ws_dir.join("manifest.json"),
+            r#"{"id":"x","name":"X","runtime_type":"nodejs","entry":"index.js","draft":true}"#,
+        )
+        .unwrap();
+        // 注意：这里**没有**调用 set_draft_flag——模拟导入流程被截断、基线未落地。
+        let resolved = store.plugin_dir(ws_id).unwrap();
+        let error = enforce_signature_gate(&store.plugins_root(), &resolved, true).unwrap_err();
+        assert!(error.contains("首见草稿"), "实际错误：{error}");
+    }
 }

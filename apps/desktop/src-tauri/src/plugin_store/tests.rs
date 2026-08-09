@@ -543,3 +543,34 @@ fn read_plugin_file_bytes_rejects_traversal() {
     let err = store.read_plugin_file_bytes("p", "../escape").unwrap_err();
     assert!(err.contains("非法") || err.contains("不存在"));
 }
+
+// === P3 闭环：导入草稿工作区的目录解析（run_plugin_adapt inPlace 合成 manifest 后 workspace 必须能被 startPlugin 正常解析）===
+
+/// workspace 优先：当 workspaces/<id> 存在时，必须解析到它（导入草稿工作区路径），
+/// 而不是退化到 <root>/<id>。
+#[test]
+fn plugin_dir_resolves_workspaces_first() {
+    let store = temp_store("ws-resolution");
+    let id = "ws-imported-0001";
+    // 同时造两个目录，证明优先级而非巧合。
+    fs::create_dir_all(store.plugins_root().join(id)).unwrap();
+    fs::create_dir_all(store.plugins_root().join("workspaces").join(id)).unwrap();
+    let resolved = store.plugin_dir(id).unwrap();
+    assert_eq!(resolved, store.plugins_root().join("workspaces").join(id));
+    assert!(resolved.exists());
+}
+
+/// 无 workspaces/<id> 时回退到 <root>/<id>（保持既有正式插件行为不退化）。
+#[test]
+fn plugin_dir_falls_back_to_root_level_when_no_workspace() {
+    let store = temp_store("ws-fallback");
+    let id = "plain-plugin";
+    fs::create_dir_all(store.plugins_root().join(id)).unwrap();
+    let resolved = store.plugin_dir(id).unwrap();
+    assert_eq!(resolved, store.plugins_root().join(id));
+    // 不应误判成 workspaces 子目录。
+    assert!(!resolved
+        .to_string_lossy()
+        .replace('\\', "/")
+        .contains("/workspaces/"));
+}
