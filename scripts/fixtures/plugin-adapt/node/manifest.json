@@ -1,0 +1,6 @@
+{
+  "name": "lingfang-smoke-node",
+  "description": "灵坊插件适配流水线冒烟样例：nodejs 运行时。entry 指向源码里的 TS 文件（产物其实是 index.js），交给 A2 纠正。",
+  "runtime_type": "nodejs",
+  "entry": "index.ts"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "lingfang-smoke-node-sdk",
+  "description": "灵坊插件适配流水线 · 集成缺陷探针：nodejs 插件依赖第三方 AI SDK（@anthropic-ai/sdk）。引擎 A4 只归一化硬编码 key/url/provider/model，不查 SDK 依赖，因此判 ADAPTED_PASSED；服务端 AI 策略闸门却以 ai.sdk.third_party 拒绝发布。",
+  "runtime_type": "nodejs"
+}
