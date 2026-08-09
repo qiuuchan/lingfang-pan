@@ -29,7 +29,7 @@
 //   - 脚本只读 fixtures，改造与打包一律落在系统临时目录。
 
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -161,6 +161,36 @@ function stageFixture(fixtureDir, runId) {
 }
 
 const b64url = (text) => Buffer.from(text, 'utf8').toString('base64url');
+
+/**
+ * 改造产物必须仍然是合法代码。
+ * A4（AI 边界归一化）会重写 .js/.mjs/.cjs，而 client 运行时确证只验 HTML、不验脚本，
+ * 语法被改坏也能拿到 canRun=true —— 这条断言就是用来兜住那个盲区的。
+ */
+function checkWorkspaceSyntax(workspaceDir) {
+  const broken = [];
+  if (!workspaceDir || !existsSync(workspaceDir)) return broken;
+  const walk = (dir) => {
+    for (const item of readdirSync(dir, { withFileTypes: true })) {
+      if (item.name === 'node_modules' || item.name.startsWith('.')) continue;
+      const abs = join(dir, item.name);
+      if (item.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (!/\.(?:js|mjs|cjs)$/.test(item.name)) continue;
+      try {
+        execFileSync(process.execPath, ['--check', abs], { stdio: 'pipe' });
+      } catch (error) {
+        const stderr = String(error.stderr ?? '');
+        const message = stderr.split('\n').find((line) => /Error/.test(line))?.trim() ?? '语法检查失败';
+        broken.push({ file: abs.slice(workspaceDir.length + 1), message });
+      }
+    }
+  };
+  walk(workspaceDir);
+  return broken;
+}
 
 /** 逐条打印改造/残留明细：这份输出会被文档站直接引用，格式要稳定可读。 */
 function printDetail(title, list, render) {
@@ -295,6 +325,17 @@ async function runCase(testCase, ctx) {
     if (result.fixesApplied === 0) result.problems.push('没有任何自动改造被应用（样例失去意义）');
     if (!report.artifactPath || !existsSync(report.artifactPath)) {
       throw new Error(`repack 未产出可用 .lfplugin：${report.artifactPath}`);
+    }
+
+    const brokenSources = checkWorkspaceSyntax(report.workspaceDir);
+    if (brokenSources.length > 0) {
+      console.log(`   × 改造产物语法损坏 ${brokenSources.length} 处（引擎缺陷，运行时确证没兜住）:`);
+      for (const item of brokenSources) console.log(`       · ${item.file} — ${item.message}`);
+      result.brokenSources = brokenSources;
+      result.defect = true;
+      for (const item of brokenSources) {
+        result.problems.push(`改造产物语法损坏：${item.file} — ${item.message}`);
+      }
     }
 
     if (!ctx.upload) {

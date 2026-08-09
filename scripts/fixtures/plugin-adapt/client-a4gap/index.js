@@ -1,9 +1,13 @@
 // 灵坊 Client 插件入口（A4 缺陷探针）
 //
-// 故意把硬编码第三方 base URL 写在独立 .js 文件里（而非内联在 <script> 中）。
-// 引擎的 A4（AI 边界归一化）会处理 .js 文件，把下面这行改写成带空兜底的桥接写法；
-// 而服务端 AI 策略闸门把「自定义 bridge 兜底」判为 ai.bridge.custom 并拒收。
-// 于是引擎判 ADAPTED_PASSED、发布却 400 —— 引擎自己的修复产物过不了服务端的闸。
+// 故意把硬编码第三方 base URL 写成**顶层 const 赋值**（而不是对象字面量的属性）。
+// 引擎 A4（AI 边界归一化）按「对象属性」的形状做替换，于是把
+//     const baseURL = "https://api.openai.com/v1";
+// 改写成
+//     const baseURL:(typeof process!=='undefined'?(...):'')+'/v1';
+// —— `=` 被吃掉，产物是语法非法的 JS（SyntaxError: Missing initializer in const declaration）。
+// 而 client 运行时确证只做 HTML 有效性 + 桥握手，不会 node --check 脚本，
+// 于是报告仍是 ADAPTED_PASSED / canRun=true，坏掉的产物一路发布成功。
 
 const baseURL = "https://api.openai.com/v1";
 
