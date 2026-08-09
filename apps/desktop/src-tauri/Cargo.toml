@@ -39,6 +39,11 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Threading",
   "Win32_System_JobObjects",
+  "Win32_System_Memory",
+  "Win32_Security",
+  "Win32_Security_Cryptography",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
 ] }
 # Task 14 插件签名校验：minisign 非对称验签（与 updater 同款，已传递依赖、直接声明复用已编译产物）。
 # verify_plugin_signature 用 PublicKey::from_base64 + verify 校验插件 manifest.sig。

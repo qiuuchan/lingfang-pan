@@ -20,6 +20,7 @@ mod process_util;
 mod runtime_commands;
 mod scheduler;
 mod runtime_resolver;
+mod secure_session;
 mod update;
 mod workflow_executor;
 
@@ -152,8 +153,18 @@ fn persist_auth_token(app: tauri::AppHandle, token: Option<String>) -> Result<()
             }
             #[cfg(not(unix))]
             {
-                std::fs::write(&path, serde_json::to_vec(&serde_json::json!({ "token": trimmed })).map_err(|e| e.to_string())?)
-                    .map_err(|e| format!("写入会话文件失败：{e}"))?;
+                // P1-3 Step 1.5（R1 子项）：token 经 DPAPI 加密后 base64 落盘，磁盘上不再存明文 JWT。
+                let enc = crate::secure_session::encrypt_token(trimmed)?;
+                std::fs::write(
+                    &path,
+                    serde_json::to_vec(&serde_json::json!({ "token_enc": enc }))
+                        .map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| format!("写入会话文件失败：{e}"))?;
+                // 显式 DACL：仅当前用户可访问（best-effort；DPAPI 已保证内容非明文）。
+                if let Err(e) = crate::secure_session::harden_file_acl(&path) {
+                    eprintln!("[session] 会话文件 DACL 加固失败（DPAPI 已加密，放行）：{e}");
+                }
             }
             Ok(())
         }
@@ -175,6 +186,23 @@ fn read_auth_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取会话文件失败：{e}"))?;
     let value: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("会话文件格式损坏：{e}"))?;
+
+    // P1-3 Step 1.5（R1 子项）：Windows 优先解 DPAPI 加密的 token_enc；
+    // 解密失败（损坏/篡改）按无会话处理，由 /api/auth/me 的 401 兜底登出。
+    #[cfg(windows)]
+    {
+        if let Some(b64) = value.get("token_enc").and_then(|v| v.as_str()) {
+            return match crate::secure_session::decrypt_token(b64) {
+                Ok(t) if !t.trim().is_empty() => Ok(Some(t)),
+                Ok(_) => Ok(None),
+                Err(e) => {
+                    eprintln!("[session] DPAPI 解密失败，按无会话处理：{e}");
+                    Ok(None)
+                }
+            };
+        }
+    }
+    // 兼容旧版明文（Unix 全平台；Windows 升级前遗留的明文文件）。
     let token = value.get("token").and_then(|v| v.as_str()).map(|s| s.to_string());
     Ok(token.filter(|t| !t.trim().is_empty()))
 }
