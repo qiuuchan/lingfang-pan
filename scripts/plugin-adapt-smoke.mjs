@@ -488,7 +488,7 @@ async function main() {
   }
   if (defectCount > 0) {
     console.log(
-      `冒烟链路跑通，但抓到 ${defectCount} 个集成缺陷：引擎判通过的改造产物被服务端策略闸门拒收，详见上面 DEFECT 项的 diagnostics。`
+      `冒烟链路跑通，但抓到 ${defectCount} 个集成缺陷：引擎判通过的改造产物过不了后续关卡（语法损坏 / 服务端策略闸门拒收），详见上面 DEFECT 项。`
     );
     return 2; // 链路 OK，集成缺陷（预期要上报/修复）
   }
