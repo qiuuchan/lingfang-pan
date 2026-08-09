@@ -45,8 +45,9 @@ export interface AdaptResult extends AdaptationReport {
 }
 
 function copyToTemp(src: string, destParent: string): string {
-  const dest = join(destParent, 'adapt-' + Date.now().toString(36));
-  mkdtempSync(join(destParent, 'adapt-'));
+  // 必须用 mkdtempSync 的返回值：Date.now() 派生的路径既可预测（共享 tmpdir 下可被抢占），
+  // 同毫秒并发还会撞名；早先的写法额外泄漏一个空目录。
+  const dest = mkdtempSync(join(destParent, 'lingfang-adapt-'));
   cpSync(src, dest, {
     recursive: true,
     filter: (p) => {
@@ -63,9 +64,8 @@ function copyToTemp(src: string, destParent: string): string {
  */
 export async function runAdaptation(opts: AdaptOptions): Promise<AdaptResult> {
   const src = opts.pluginDir;
-  if (!existsSync(join(src, 'manifest.json')) && !opts.inPlace) {
-    // 即便没有 manifest，也拷贝目录以便 transform 生成
-  }
+  if (!existsSync(src)) throw new Error(`插件目录不存在：${src}`);
+  // 没有 manifest 也照样拷贝——A1 改造就是要为这种插件生成 manifest。
   const workspaceDir = opts.inPlace ? src : copyToTemp(src, tmpdir());
   const ws = new AdaptWorkspace(workspaceDir);
 
@@ -116,6 +116,7 @@ export async function runAdaptation(opts: AdaptOptions): Promise<AdaptResult> {
     fixesApplied: fixes,
     canRun,
     runEvidence,
+    adapted: true,
     executed: Boolean(opts.execute),
   });
 
@@ -133,6 +134,7 @@ export async function validateOnly(pluginDir: string): Promise<AdaptationReport>
     runtimeType: manifest?.runtime_type as string | undefined,
     issues,
     fixesApplied: [],
+    adapted: false,
     executed: false,
   });
 }

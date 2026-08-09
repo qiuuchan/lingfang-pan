@@ -86,6 +86,9 @@ export function buildReport(input: {
   fixesApplied: FixApplied[];
   canRun?: boolean;
   runEvidence?: RunEvidence[];
+  /** 是否真的跑了改造流水线。false = 纯静态 dry-run，只能产出 NOT_RUN。 */
+  adapted?: boolean;
+  /** 是否执行了运行时确证（短跑/冒烟）。 */
   executed?: boolean;
 }): AdaptationReport {
   const { issues, fixesApplied } = input;
@@ -93,15 +96,22 @@ export function buildReport(input: {
     (i) => i.severity === 'needs_human' || i.severity === 'auto_fixable'
   );
   const ok = remaining.length === 0;
-  let status: AdaptationStatus;
-  if (!input.executed && !ok) status = 'NEEDS_HUMAN';
-  else if (!ok) status = 'ADAPTED_FAILED';
-  else if (remaining.length > 0) status = 'NEEDS_HUMAN';
-  else status = input.canRun ? 'ADAPTED_PASSED' : 'ADAPTED_PASSED';
+  const canRun = input.canRun ?? false;
 
-  const summary = ok
-    ? `适配通过（应用 ${fixesApplied.length} 项自动改造）`
-    : `适配未完成：剩余 ${remaining.length} 项待人工/agent 处理（已应用 ${fixesApplied.length} 项自动改造）`;
+  // status 会随发布上送服务端并成为审核依据，所以「没跑流水线」和「跑了但没过」
+  // 必须区分开：纯 dry-run 即使零问题也不能自称 ADAPTED_PASSED。
+  let status: AdaptationStatus;
+  if (!input.adapted) status = 'NOT_RUN';
+  else if (remaining.some((i) => i.severity === 'needs_human')) status = 'NEEDS_HUMAN';
+  else if (remaining.length > 0) status = 'ADAPTED_FAILED';
+  else if (input.executed && !canRun) status = 'ADAPTED_FAILED';
+  else status = 'ADAPTED_PASSED';
+
+  const summary = !input.adapted
+    ? `静态校验完成：发现 ${issues.length} 个问题（未执行改造）`
+    : ok
+      ? `适配通过（应用 ${fixesApplied.length} 项自动改造）`
+      : `适配未完成：剩余 ${remaining.length} 项待人工/agent 处理（已应用 ${fixesApplied.length} 项自动改造）`;
 
   return {
     ok,
@@ -110,7 +120,7 @@ export function buildReport(input: {
     issues,
     fixesApplied,
     remaining,
-    canRun: input.canRun ?? false,
+    canRun,
     runEvidence: input.runEvidence,
     status,
     summary,

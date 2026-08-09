@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "cli:dev": "tsx src/cli/index.ts"
+    "cli:dev": "tsx src/cli/index.ts",
+    "build:adapt": "node scripts/build-adapt.mjs"
   },
   "dependencies": {
     "@lingfang/contract": "workspace:*",
@@ -25,6 +26,7 @@
     "typescript": "^5",
     "vitest": "^4.1.8",
     "@vitest/coverage-v8": "4.1.8",
+    "esbuild": "^0.25.12",
     "tsx": "^4.19.2"
   }
 }

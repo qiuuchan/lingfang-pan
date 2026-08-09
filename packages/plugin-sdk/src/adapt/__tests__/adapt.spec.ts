@@ -7,6 +7,7 @@ import { AdaptWorkspace } from '../workspace.ts';
 import { validateWorkspace } from '../validate.ts';
 import { applyTransforms, transformMissingFields, transformEntry, transformCapabilities, transformAiBoundary } from '../transform.ts';
 import { runAdaptation, validateOnly } from '../index.ts';
+import { buildReport } from '../report.ts';
 
 let root: string;
 function makePlugin(files: Record<string, string>): string {
@@ -140,5 +141,90 @@ describe('runAdaptation 闭环（不执行）', () => {
     const report = await validateOnly(dir);
     expect(report.fixesApplied.length).toBe(0);
     expect(report.issues.length).toBeGreaterThan(0);
+  });
+
+  it('纯静态校验即使零问题也只报 NOT_RUN', async () => {
+    // status 会随发布落库成为审核依据，dry-run 不能冒充跑过流水线。
+    const clean = makePlugin({
+      'manifest.json': JSON.stringify({ id: 'demo', name: 'demo', version: '0.1.0', runtime_type: 'client', entry: 'ui/index.html', capabilities: [], visibility: 'private' }),
+      'ui/index.html': '<!doctype html><html></html>',
+    });
+    const report = await validateOnly(clean);
+    expect(report.status).toBe('NOT_RUN');
+    expect(report.summary).toContain('未执行改造');
+  });
+
+  it('改造后无残留问题时报 ADAPTED_PASSED', async () => {
+    const dir = makePlugin({
+      'manifest.json': JSON.stringify({ name: 'My Plugin', version: '0.1.0', runtime_type: 'nodejs', entry: 'index.js', capabilities: [] }),
+      'index.js': "fetch('https://x');",
+    });
+    const result = await runAdaptation({ pluginDir: dir });
+    expect(result.remaining).toHaveLength(0);
+    expect(result.status).toBe('ADAPTED_PASSED');
+  });
+
+  it('每次改造都落在独立的临时工作区，不撞名也不复用', async () => {
+    const files = {
+      'manifest.json': JSON.stringify({ name: 'Same Plugin', version: '0.1.0', runtime_type: 'nodejs', entry: 'index.js', capabilities: [] }),
+      'index.js': 'export default 1;',
+    };
+    const [a, b] = await Promise.all([
+      runAdaptation({ pluginDir: makePlugin(files) }),
+      runAdaptation({ pluginDir: makePlugin(files) }),
+    ]);
+    expect(a.workspaceDir).not.toBe(b.workspaceDir);
+  });
+
+  it('源目录不存在时明确报错而不是产出空报告', async () => {
+    await expect(runAdaptation({ pluginDir: join(root, 'definitely-missing') })).rejects.toThrow(
+      /插件目录不存在/
+    );
+  });
+});
+
+describe('buildReport 状态判定', () => {
+  const issue = (severity: 'needs_human' | 'auto_fixable' | 'fixed') => ({
+    code: 'X',
+    category: 'manifest' as const,
+    severity,
+    message: 'm',
+    fixable: severity === 'auto_fixable',
+  });
+
+  it('跑过流水线但残留需人工项 → NEEDS_HUMAN', () => {
+    expect(
+      buildReport({ issues: [issue('needs_human')], fixesApplied: [], adapted: true }).status
+    ).toBe('NEEDS_HUMAN');
+  });
+
+  it('跑过流水线但仍有没修掉的可修项 → ADAPTED_FAILED', () => {
+    expect(
+      buildReport({ issues: [issue('auto_fixable')], fixesApplied: [], adapted: true }).status
+    ).toBe('ADAPTED_FAILED');
+  });
+
+  it('执行了运行时确证却没跑起来 → ADAPTED_FAILED', () => {
+    expect(
+      buildReport({
+        issues: [issue('fixed')],
+        fixesApplied: [],
+        adapted: true,
+        executed: true,
+        canRun: false,
+      }).status
+    ).toBe('ADAPTED_FAILED');
+  });
+
+  it('执行确证且跑起来了 → ADAPTED_PASSED', () => {
+    expect(
+      buildReport({
+        issues: [],
+        fixesApplied: [],
+        adapted: true,
+        executed: true,
+        canRun: true,
+      }).status
+    ).toBe('ADAPTED_PASSED');
   });
 });
