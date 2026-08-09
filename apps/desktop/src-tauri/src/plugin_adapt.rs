@@ -16,7 +16,7 @@
 //! - 环境走 `RuntimeResolver::env`：清空宿主 PATH + 注入内置运行时 PATH + 镜像源，
 //!   并把解析到的 node/python 绝对路径经协议传给引擎（`runtime` 字段），供 `execute` 确证使用。
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -145,6 +145,11 @@ fn run_plugin_adapt_blocking(
     .spawn(|message| eprintln!("[plugin-adapt] {message}"))
     .map_err(|e| format!("启动适配引擎失败：{e}"))?;
 
+    // 必须在写 stdin **之前**就把两个输出管道挂上读线程：引擎会一边读 stdin 一边往 stderr
+    // 打诊断，若此刻无人收管道，双方各自阻塞在写端即成死锁。
+    let stdout_reader = child.stdout.take().map(spawn_pipe_reader);
+    let stderr_reader = child.stderr.take().map(spawn_pipe_reader);
+
     // 进程已 resume（spawn 内部入 Job 后放行），会消费 stdin 管道。请求体很小，同步写不会死锁；
     // 写后 drop stdin 关闭管道，引擎读到 EOF 即开始执行。
     {
@@ -157,17 +162,27 @@ fn run_plugin_adapt_blocking(
             .map_err(|e| format!("写入适配请求失败：{e}"))?;
     }
 
-    let output = wait_with_timeout(child, Duration::from_secs(180))?;
+    let wait_result = wait_with_timeout(&mut child, Duration::from_secs(180));
+    // 进程已退出/被杀 → 管道写端关闭 → 读线程读到 EOF 自然收敛，join 不会挂。
+    let stdout_bytes = join_pipe_reader(stdout_reader);
+    let stderr_bytes = join_pipe_reader(stderr_reader);
     drop(sandbox);
-
-    let stdout_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    // bin.ts 协议：stdout 只有一行 JSON，且任何情况都输出可解析 JSON（含失败）。
-    let line = stdout_text.lines().next().ok_or_else(|| {
-        format!(
-            "适配引擎未返回任何输出；stderr: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )
+    let stderr_text = String::from_utf8_lossy(&stderr_bytes).trim().to_string();
+    // 超时错误带上 stderr：引擎的诊断信息是定位「卡在哪一步」的唯一线索。
+    wait_result.map_err(|e| {
+        if stderr_text.is_empty() {
+            e
+        } else {
+            format!("{e}stderr: {stderr_text}")
+        }
     })?;
+
+    let stdout_text = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
+    // bin.ts 协议：stdout 只有一行 JSON，且任何情况都输出可解析 JSON（含失败）。
+    let line = stdout_text
+        .lines()
+        .next()
+        .ok_or_else(|| format!("适配引擎未返回任何输出；stderr: {stderr_text}"))?;
     let value: serde_json::Value = serde_json::from_str(line)
         .map_err(|e| format!("解析适配引擎输出失败：{e}；原始输出：{stdout_text}"))?;
 
@@ -192,27 +207,45 @@ fn run_plugin_adapt_blocking(
     }
 }
 
+/// 起线程把一个管道读干净。
+///
+/// stdout/stderr 都是 `piped()`，**必须**有人并发读：只轮询 `try_wait` 而不收管道时，
+/// 子进程写满管道缓冲区（Windows 匿名管道只有几十 KB）后会永久阻塞在 write，进程永不退出，
+/// 于是一路卡到超时。适配报告 JSON 体量很容易越过这个阈值——即「报告小能过、报告大必挂」。
+fn spawn_pipe_reader<R: Read + Send + 'static>(mut pipe: R) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        // 读失败（管道被强制关闭等）时返回已读到的部分，交由调用方按空输出处理。
+        let _ = pipe.read_to_end(&mut buffer);
+        buffer
+    })
+}
+
+/// 回收读线程的结果；线程 panic 或管道缺失时按空输出处理。
+fn join_pipe_reader(handle: Option<std::thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+    handle
+        .map(|h| h.join().unwrap_or_default())
+        .unwrap_or_default()
+}
+
 /// 带超时地等待子进程收敛；超时则杀整棵进程树（Job Object 内可能派生出 npm/插件进程）。
-/// 直接接收 `child` 所有权：`wait_with_output` 需要 move 出去，超时时也直接对之 kill。
-fn wait_with_timeout(
-    mut child: std::process::Child,
-    timeout: Duration,
-) -> Result<std::process::Output, String> {
+///
+/// 只负责「等」，不碰管道——输出由 [`spawn_pipe_reader`] 的线程并发收走。
+fn wait_with_timeout(child: &mut std::process::Child, timeout: Duration) -> Result<(), String> {
     let started = Instant::now();
     loop {
         match child
             .try_wait()
             .map_err(|e| format!("轮询适配引擎状态失败：{e}"))?
         {
-            Some(_) => {
-                return child
-                    .wait_with_output()
-                    .map_err(|e| format!("读取适配引擎输出失败：{e}"));
-            }
+            Some(_) => return Ok(()),
             None => {
                 if started.elapsed() > timeout {
-                    kill_child_tree(&child);
-                    return Err("适配引擎超时（默认 180s），已终止进程树。".to_string());
+                    kill_child_tree(child);
+                    return Err(format!(
+                        "适配引擎超时（{}s），已终止进程树。",
+                        timeout.as_secs()
+                    ));
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
