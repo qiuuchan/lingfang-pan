@@ -41,6 +41,12 @@ lingfang-plugin — 灵方插件开发工具
 
   validate [path]    校验插件合法性（默认当前目录）
      --json            输出 JSON 格式（用于程序消费）
+  adapt [path]       适配检验改造：校验 + 确定性自动改造 + 可选执行确证
+     --execute         执行运行时确证（需本机有对应运行时）
+     --repack          改造后重新打包成 .lfplugin
+     --out <dir>       打包输出目录
+     --in-place        原地改造（危险，默认拷贝到临时工作区）
+     --json            输出 JSON 格式
   build [path]       打包 .lfplugin 制品
      --out <file>     自定义输出文件名
      --json           输出 JSON 格式
@@ -114,6 +120,23 @@ async function main(): Promise<number> {
         json: args.flags['json'] === true,
       };
       return buildCommand(restArgs, opts);
+    }
+    case 'adapt': {
+      const { adaptCommand } = await import('./commands/adapt.ts');
+      const opts = {
+        path:
+          typeof restArgs[0] === 'string' && restArgs[0].length > 0
+            ? restArgs[0]
+            : typeof args.flags['path'] === 'string'
+              ? args.flags['path']
+              : undefined,
+        execute: args.flags['execute'] === true,
+        repack: args.flags['repack'] === true,
+        out: typeof args.flags['out'] === 'string' ? args.flags['out'] : undefined,
+        inPlace: args.flags['in-place'] === true,
+        json: args.flags['json'] === true,
+      };
+      return adaptCommand(restArgs, opts);
     }
     case 'publish': {
       const { publishCommand } = await import('./commands/publish.ts');
