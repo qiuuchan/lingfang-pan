@@ -7,6 +7,7 @@ mod builtin_plugin_index;
 mod capability;
 mod draft_plugin;
 mod mirror_presets;
+mod plugin_adapt;
 mod plugin_artifact_v4;
 mod plugin_llm_bridge;
 mod plugin_package_manager;
@@ -593,6 +594,7 @@ fn main() {
             plugin_llm_bridge::respond_plugin_action_bridge,
             plugin_shell::run_plugin_shell,
             runtime_commands::get_runtime_status,
+            plugin_adapt::run_plugin_adapt,
             plugin_runner::start_plugin,
             plugin_runner::stop_plugin,
             plugin_runner::delete_plugin,

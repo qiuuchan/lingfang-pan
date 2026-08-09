@@ -1,3 +1,7 @@
 # 本地运行时下载落点（task 07-03：dev 模式按需下载便携版 Python/Node 到此目录，不入库）
 # 开发态按需下载运行时，生产态写入用户本地应用数据目录。
 .local-runtimes/
+
+# 适配引擎单文件产物（packages/plugin-sdk/dist/adapt.mjs 经 scripts/materialize-adapt-engine.mjs
+# 复制到此目录，再随 Tauri 资源打包）。源产物是 gitignored 构建产物，不入库。
+adapt/adapt.mjs

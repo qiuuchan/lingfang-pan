@@ -198,6 +198,16 @@ impl GuardedCommand {
         self
     }
 
+    /// 设置子进程 stdin（默认 `Stdio::null()`）。
+    ///
+    /// 用于需要向子进程喂 JSON 请求的命令（如 `plugin_adapt` 把请求经 stdin 传给 adapt.mjs）。
+    /// 注：`spawn()` 已用 `self.stdin` 接管 stdio，这里只补一个构造入口；进程以挂起态起、
+    /// 入 Job 后才 resume，调用方应在 `spawn()` 返回后写 stdin（此时进程才开始消费管道）。
+    pub(crate) fn stdin(mut self, stdio: Stdio) -> Self {
+        self.stdin = stdio;
+        self
+    }
+
     /// spawn 并套上沙箱。
     ///
     /// `on_log` 用于把沙箱降级/失败原因写进调用方的启动日志（长驻插件写 `.launch.log`）。

@@ -14,7 +14,8 @@
     "targets": ["nsis"],
     "resources": {
       "../builtin-plugins": "builtin-plugins",
-      "../runtimes": "runtimes"
+      "../runtimes": "runtimes",
+      "../adapt": "adapt"
     },
     "copyright": "© 2026 灵坊工作台",
     "shortDescription": "灵坊工作台 协作平台桌面客户端",
