@@ -605,6 +605,9 @@ impl PluginStore {
         let pretty =
             serde_json::to_string_pretty(&v).map_err(|e| format!("序列化 manifest 失败：{e}"))?;
         fs::write(&manifest_path, pretty).map_err(|e| format!("写入 manifest 失败：{e}"))?;
+        // P1-3 Step 4：草稿身份的唯一授权变更通路——同步刷新框架侧基线证明。
+        // 不同步的话，签名门禁只认旧基线，发布（draft→false）后仍会按草稿豁免。
+        crate::plugin_security::mark_manifest_attestation(&self.plugins_root(), &dir, draft)?;
         Ok(())
     }
 }

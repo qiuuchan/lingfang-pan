@@ -1117,7 +1117,7 @@ impl PluginPackageManager {
         }
         // M-3/P1-2：远端 Team/Marketplace 发布链路强制签名（fail-closed）后才落盘提交。
         if matches!(input.origin, InstallationOrigin::Team | InstallationOrigin::Marketplace) {
-            if let Err(error) = crate::plugin_security::enforce_signature_gate(
+            if let Err(error) = crate::plugin_security::enforce_signature_gate_staged(
                 &self.plugins_root,
                 &staging_package,
                 true,
