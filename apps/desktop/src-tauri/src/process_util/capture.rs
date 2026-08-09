@@ -23,14 +23,16 @@ pub(crate) fn run_captured_inner(
     workspace_dir: Option<&str>,
     timeout_ms: u64,
     env: Option<&[(OsString, OsString)]>,
+    policy: SandboxPolicy,
 ) -> Result<CapturedOutput, String> {
-    // 工具链通道（venv/pip/pnpm/探测/脚本预览）目前用 exempt 策略：不建 Job，行为与加固前一致。
-    // 逐通道换成真实策略见 P1-3 计划 Step 6。
-    let GuardedChild { child, sandbox } =
-        GuardedCommand::new(binary, args, SandboxPolicy::exempt())
-            .cwd_opt(workspace_dir)
-            .env_exact_opt(env.map(|env| env.to_vec()))
-            .spawn(|_| {})?;
+    // 通道策略由调用方按通道语义决定（Step 6）：
+    // - 依赖安装（venv/pip/pnpm）→ `SandboxPolicy::install()`；
+    // - 插件试跑 / workflow action → `plugin_entry(Some_tier)`；
+    // - 版本探针 / Agent 开发 shell → `SandboxPolicy::exempt()`（不建 Job，行为与加固前一致）。
+    let GuardedChild { child, sandbox } = GuardedCommand::new(binary, args, policy)
+        .cwd_opt(workspace_dir)
+        .env_exact_opt(env.map(|env| env.to_vec()))
+        .spawn(|_| {})?;
     let captured = wait_for_capture(child, timeout_ms, None);
     drop(sandbox);
     captured
@@ -42,8 +44,9 @@ pub(crate) fn run_capture_with_env(
     workspace_dir: Option<&str>,
     timeout_ms: u64,
     env: Vec<(OsString, OsString)>,
+    policy: SandboxPolicy,
 ) -> Result<CapturedOutput, String> {
-    run_captured_inner(binary, args, workspace_dir, timeout_ms, Some(&env))
+    run_captured_inner(binary, args, workspace_dir, timeout_ms, Some(&env), policy)
 }
 
 pub(crate) fn run_capture_with_env_and_cancel(
@@ -53,12 +56,12 @@ pub(crate) fn run_capture_with_env_and_cancel(
     timeout_ms: u64,
     env: Vec<(OsString, OsString)>,
     cancel: &AtomicBool,
+    policy: SandboxPolicy,
 ) -> Result<CapturedOutput, String> {
-    let GuardedChild { child, sandbox } =
-        GuardedCommand::new(binary, args, SandboxPolicy::exempt())
-            .cwd_opt(workspace_dir)
-            .env_exact(env)
-            .spawn(|_| {})?;
+    let GuardedChild { child, sandbox } = GuardedCommand::new(binary, args, policy)
+        .cwd_opt(workspace_dir)
+        .env_exact(env)
+        .spawn(|_| {})?;
     let captured = wait_for_capture(child, timeout_ms, Some(cancel));
     drop(sandbox);
     captured
@@ -77,6 +80,7 @@ pub(crate) fn run_streamed_with_env<F>(
     workspace_dir: Option<&str>,
     timeout_ms: u64,
     env: Vec<(OsString, OsString)>,
+    policy: SandboxPolicy,
     on_line: F,
 ) -> Result<CapturedOutput, String>
 where
@@ -85,7 +89,7 @@ where
     let GuardedChild {
         mut child,
         sandbox,
-    } = GuardedCommand::new(binary, args, SandboxPolicy::exempt())
+    } = GuardedCommand::new(binary, args, policy)
         .cwd_opt(workspace_dir)
         .env_exact(env)
         .spawn(|_| {})?;

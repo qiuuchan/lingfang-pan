@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use crate::plugin_llm_bridge::{PluginBridgeClientSource, PluginLlmBridge};
-use crate::process_util::{resolve_workspace, run_capture_with_env, CapturedOutput};
+use crate::process_util::{
+    resolve_workspace, run_capture_with_env, CapturedOutput, SandboxPolicy, SandboxTier,
+};
 use crate::runtime_resolver::RuntimeResolver;
 // 复用 plugin_runner 的依赖安装（ensure_python_venv/ensure_node_dependencies）和环境变量白名单，
 // 让试跑与持久化运行用同一套依赖管理逻辑（venv 创建/pip install/pnpm install），避免行为漂移。
@@ -142,6 +144,7 @@ fn probe_script_runtime_inner(
         None,
         5_000,
         resolver.env(minimal_env()),
+        SandboxPolicy::exempt(),
     ) {
         Ok(captured) if !captured.timed_out && captured.exit_code == Some(0) => {
             let raw_version = format!("{}\n{}", captured.stdout.trim(), captured.stderr.trim());
@@ -610,8 +613,16 @@ pub fn run_plugin_script(
             OsString::from(bridge_env.token),
         ));
     }
-    let captured: CapturedOutput =
-        run_capture_with_env(&run_binary, args, Some(&workspace), timeout, env)?;
+    let captured: CapturedOutput = run_capture_with_env(
+        &run_binary,
+        args,
+        Some(&workspace),
+        timeout,
+        env,
+        // 试跑执行用户插件代码（可能来自 GitHub 导入的第三方仓库），与入口进程同等严格：
+        // UserInstalled 档 fail-closed，沙箱不可用就不许试跑。
+        SandboxPolicy::plugin_entry(SandboxTier::UserInstalled),
+    )?;
     Ok(RunResult {
         stdout: captured.stdout,
         stderr: captured.stderr,

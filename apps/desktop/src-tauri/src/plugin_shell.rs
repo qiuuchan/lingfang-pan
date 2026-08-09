@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::plugin_runner::{minimal_env, python_venv_dir, venv_python};
 use crate::plugin_store::PluginStore;
-use crate::process_util::run_capture_with_env;
+use crate::process_util::{run_capture_with_env, SandboxPolicy};
 use crate::runtime_resolver::RuntimeResolver;
 
 /// run_plugin_shell 命令入参（前端传 camelCase，封装层转 snake_case）。
@@ -90,6 +90,18 @@ pub(crate) enum ShellRuntime {
 /// 5. env 构造：resolver.env(minimal_env()) 起点 + prepend 插件专属 PATH（venv 或 node_modules/.bin）。
 /// 6. shell binary 绝对路径（resolver 清空了宿主 PATH，cmd/powershell 必须用绝对路径）。
 /// 7. run_capture_with_env 捕获 stdout/stderr/exit_code。
+///
+/// Step 6 哨兵：run_plugin_shell 的沙箱策略必须是 Exempt（有意设计，勿随手改成受控档）。
+/// 理由与边界见 P1-3 计划 §0 非目标：该通道语义等同「用户的交互式终端」（Agent
+/// 开发工具），命令来自用户在场驱动的对话，并带来源窗口校验 + 超时 kill 兜底。
+/// 若误接 UserInstalled 档的 fail-closed，Job Object 不可用环境将无法执行任何
+/// Agent 开发命令。防误接由 `shell_policy_is_exempt_by_design` 测试锁定——
+/// 任何人改了这个返回值，cargo test 立即红。
+#[allow(dead_code)]
+fn shell_policy() -> SandboxPolicy {
+    SandboxPolicy::exempt()
+}
+
 #[tauri::command]
 pub fn run_plugin_shell(
     window: tauri::WebviewWindow,
@@ -168,12 +180,16 @@ pub fn run_plugin_shell(
     let timeout_ms = input.timeout_ms.unwrap_or(120_000);
     let cwd_str = cwd.to_string_lossy().to_string();
     let started = std::time::Instant::now();
+    // ⚠️ Step 6 显式豁免（有意为之，勿改）：策略统一从 `shell_policy()` 哨兵取，
+    // 其返回值由 `shell_policy_is_exempt_by_design` 测试锁定。若这里改用受控档，
+    // Job Object 不可用环境将完全无法跑 Agent 开发命令（见 P1-3 计划 §0 非目标）。
     let captured = run_capture_with_env(
         &binary,
         vec![flag, input.command],
         Some(&cwd_str),
         timeout_ms,
         env,
+        shell_policy(),
     )
     .map_err(|e| format!("执行 shell 命令失败：{e}"))?;
 
@@ -405,6 +421,23 @@ pub(crate) fn resolve_shell_binary(kind: ShellKind) -> Result<(PathBuf, String),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Step 6 防误接回归：run_plugin_shell 的沙箱策略必须保持 Exempt。
+    /// 若有人把 `shell_policy()` 改成受控档（如 UserInstalled 的 fail-closed），
+    /// 本测试立即红——这是「编译期断言防误接」的运行时等价物（该 fn 无泛型，
+    /// 无法用 const 断言，用单测锁定期望值同样不可静默漂移）。
+    #[test]
+    fn shell_policy_is_exempt_by_design() {
+        let policy = shell_policy();
+        assert!(
+            !policy.needs_sandbox(),
+            "run_plugin_shell 必须保持无围栏（Agent 交互终端语义）"
+        );
+        assert!(
+            !policy.tier.fail_closed(),
+            "shell 通道绝不能 fail-closed"
+        );
+    }
 
     /// 构造临时插件目录并 canonicalize（模拟生产环境 ensure_plugin_dir 返回的规范路径）。
     /// resolve_cwd 的 starts_with 断言依赖 plugin_dir 已 canonicalize（否则 \\?\ 前缀不一致）。

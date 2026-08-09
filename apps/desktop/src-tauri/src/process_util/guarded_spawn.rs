@@ -55,7 +55,7 @@ pub(crate) enum SandboxTier {
 
 impl SandboxTier {
     /// 沙箱不可用时是否拒绝启动。
-    fn fail_closed(self) -> bool {
+    pub(crate) fn fail_closed(self) -> bool {
         matches!(self, SandboxTier::UserInstalled)
             && !matches!(std::env::var(SANDBOX_SOFT_ENV).as_deref(), Ok("1"))
     }
@@ -134,8 +134,24 @@ impl SandboxPolicy {
         }
     }
 
+    /// 依赖安装/工具链通道策略（pip/pnpm/uv/venv/冒烟，Step 6 接入）。
+    ///
+    /// 为什么按 UserInstalled 档 fail-closed：安装过程会执行**第三方**的 `setup.py` /
+    /// `postinstall` 脚本，与插件本体同属不可信代码（R7），沙箱不可用时同样不许放行。
+    /// 配额取宽口径：pnpm 并行 worker 与 pip 构建进程可显式 spawn 多线程/多进程，
+    /// 故进程数/内存/CPU 都给比 entry 更大的余量。
+    pub(crate) fn install() -> Self {
+        SandboxPolicy {
+            tier: SandboxTier::UserInstalled,
+            active_process_limit: 128,
+            process_memory_limit: 6 * 1024 * 1024 * 1024,
+            cpu_rate: 9000,
+            ui_restrictions: UI_RESTRICTIONS_DEFAULT,
+        }
+    }
+
     /// 是否需要建 Job Object。
-    fn needs_sandbox(&self) -> bool {
+    pub(crate) fn needs_sandbox(&self) -> bool {
         !matches!(self.tier, SandboxTier::Exempt)
     }
 }
@@ -413,6 +429,23 @@ mod tests {
         assert!(SandboxTier::UserInstalled.fail_closed());
         assert!(!SandboxTier::Builtin.fail_closed());
         assert!(!SandboxTier::Exempt.fail_closed());
+    }
+
+    #[test]
+    fn install_policy_is_sandboxed_and_fails_closed() {
+        // 依赖安装通道执行第三方 setup.py / postinstall（R7），与插件本体同等不可信：
+        // 必须建 Job 且 sandbox 失败时 fail-closed（SANDBOX_SOFT 逃生开关仍可用）。
+        let policy = SandboxPolicy::install();
+        assert!(policy.needs_sandbox(), "安装通道必须建 Job");
+        assert!(
+            policy.tier.fail_closed(),
+            "安装通道执行第三方代码，沙箱不可用时不得放行"
+        );
+        assert!(
+            policy.active_process_limit >= 64,
+            "pnpm 并行 worker / pip 构建进程需要余量"
+        );
+        assert!(policy.ui_restrictions != 0, "安装通道同样适用 UI 限制");
     }
 
     #[test]

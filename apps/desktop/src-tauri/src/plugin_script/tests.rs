@@ -173,6 +173,7 @@ fn run_node_hello_script_if_available() {
         None,
         5_000,
         minimal_env(),
+        SandboxPolicy::exempt(),
     )
     .expect("node 运行应成功");
     assert!(!captured.timed_out);
@@ -206,6 +207,7 @@ fn run_python_hello_script_if_available() {
         None,
         5_000,
         minimal_env(),
+        SandboxPolicy::exempt(),
     )
     .expect("python 运行应成功");
     assert!(!captured.timed_out);
@@ -241,6 +243,7 @@ fn timeout_kills_infinite_loop() {
         None,
         800,
         minimal_env(),
+        SandboxPolicy::exempt(),
     )
     .expect("超时应被 kill 并返回而非报错");
     assert!(captured.timed_out);
@@ -343,6 +346,7 @@ fn timeout_kills_grandchild_process_tree() {
         None,
         800,
         minimal_env(),
+        SandboxPolicy::exempt(),
     )
     .expect("超时应杀进程组并返回，不永久阻塞");
     let elapsed = started.elapsed().as_millis();
@@ -395,6 +399,7 @@ console.error("诊断信息");
         Some(tmp.to_str().unwrap()),
         10_000,
         minimal_env(),
+        SandboxPolicy::exempt(),
     )
     .unwrap();
     assert!(!captured.timed_out, "node 不应超时");
@@ -461,6 +466,7 @@ sys.stderr.write("诊断：Python stderr\n")
         Some(&workspace),
         10_000,
         env,
+        SandboxPolicy::exempt(),
     )
     .unwrap();
     assert!(!captured.timed_out, "python 不应超时");

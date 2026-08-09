@@ -11,7 +11,10 @@ use tauri::Manager;
 use crate::plugin_llm_bridge::{PluginBridgeEnv, PluginLlmBridge};
 use crate::plugin_package_manager::{InstalledActionBinding, PluginPackageManager};
 use crate::plugin_runner::{ensure_node_dependencies, ensure_python_venv, minimal_env};
-use crate::process_util::{run_capture_with_env, run_capture_with_env_and_cancel, CapturedOutput};
+use crate::process_util::{
+    run_capture_with_env, run_capture_with_env_and_cancel, CapturedOutput, SandboxPolicy,
+    SandboxTier,
+};
 use crate::runtime_resolver::RuntimeResolver;
 
 #[derive(Default)]
@@ -391,10 +394,25 @@ fn capture_action_process(
     cancel: Option<&AtomicBool>,
 ) -> Result<CapturedOutput, String> {
     match cancel {
-        Some(cancel) => {
-            run_capture_with_env_and_cancel(binary, args, Some(workspace), timeout_ms, env, cancel)
-        }
-        None => run_capture_with_env(binary, args, Some(workspace), timeout_ms, env),
+        Some(cancel) => run_capture_with_env_and_cancel(
+            binary,
+            args,
+            Some(workspace),
+            timeout_ms,
+            env,
+            cancel,
+            // 云端调度到桌面的 action 执行用户/第三方绑定代码，无用户在场确认（R7 之外
+            // 新增执行面），与入口进程同等严格：UserInstalled 档 fail-closed。
+            SandboxPolicy::plugin_entry(SandboxTier::UserInstalled),
+        ),
+        None => run_capture_with_env(
+            binary,
+            args,
+            Some(workspace),
+            timeout_ms,
+            env,
+            SandboxPolicy::plugin_entry(SandboxTier::UserInstalled),
+        ),
     }
 }
 

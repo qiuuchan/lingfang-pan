@@ -1313,6 +1313,8 @@ impl StreamCtx {
 
 /// 按是否提供 StreamCtx 选择流式/捕获运行。
 /// Some(ctx) → run_streamed_with_env（逐行 emit plugin:output）；None → run_capture_with_env（静默）。
+/// 依赖安装/工具链通道统一走 `install()` 策略（Step 6）：pip/pnpm 会执行第三方
+/// setup.py / postinstall（R7），与插件本体一样按 UserInstalled 档 fail-closed。
 fn run_with_optional_stream(
     binary: &PathBuf,
     args: Vec<String>,
@@ -1328,9 +1330,17 @@ fn run_with_optional_stream(
             workspace_dir,
             timeout_ms,
             env,
+            SandboxPolicy::install(),
             ctx.make_line_callback(),
         ),
-        None => run_capture_with_env(binary, args, workspace_dir, timeout_ms, env),
+        None => run_capture_with_env(
+            binary,
+            args,
+            workspace_dir,
+            timeout_ms,
+            env,
+            SandboxPolicy::install(),
+        ),
     }
 }
 

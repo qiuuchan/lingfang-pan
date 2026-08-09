@@ -95,6 +95,8 @@ fn probe_version(exe: &Path, kind: RuntimeKind) -> Result<String, String> {
         None,
         5_000,
         crate::plugin_runner::minimal_env(),
+        // 版本探针只执行 `--version`，不接触任何插件/依赖代码（A8/A11 可豁免档）。
+        crate::process_util::SandboxPolicy::exempt(),
     )
     .map_err(|error| format!("{} 版本探测失败：{error}", label(kind)))?;
     if captured.exit_code != Some(0) {
