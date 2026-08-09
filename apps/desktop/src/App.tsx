@@ -22,6 +22,7 @@ import {
   errorMessage,
   getAuthToken,
   normalizeBackendUrl,
+  restoreTokenFromHost,
   setAuthToken,
   tauriInvoke,
   tauriListen,
@@ -697,6 +698,30 @@ export default function App() {
       .finally(() => {
         if (!cancelled) setRestoring(false);
       });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // C1（H-6 修复配套）：启动时从 Rust 侧恢复 token（localStorage 被清空/禁用时免重登）。
+  // 仅当内存里还没有 token 时注入；注入后走与上方同款的静默刷新（失败不登出）。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const token = await restoreTokenFromHost();
+      if (cancelled || !token || sessionRef.current.token) return;
+      sessionRef.current = { ...sessionRef.current, token };
+      setSession(sessionRef.current);
+      setRestoring(true);
+      try {
+        await refreshSession();
+      } catch {
+        // 网络/后端未启动：保留已恢复会话，下次启动重试（401 由统一 401 拦截兜底登出）。
+      } finally {
+        if (!cancelled) setRestoring(false);
+      }
+    })();
     return () => {
       cancelled = true;
     };

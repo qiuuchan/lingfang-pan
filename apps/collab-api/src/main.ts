@@ -20,14 +20,26 @@ function readPackageVersion(): string {
 }
 
 async function bootstrap() {
-  // 根因修复（AUTH-04 / XSEC-04）：JWT_SECRET 缺失或过短时启动期 fail-fast，
-  // 杜绝回退到公开默认值 'dev-collab-change-me' 导致任意 token 可伪造。
-  // 凭证伪造会使全平台失守，属数据完整性防线而非附加安全控制，不可妥协。
-  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('启动失败：必须设置 JWT_SECRET 环境变量（不少于 16 字符）');
-    }
-    console.warn('[安全警告] JWT_SECRET 未设置或过短，开发环境继续运行，生产环境将拒绝启动。');
+  // 根因修复（AUTH-04 / XSEC-04 / H-5）：JWT_SECRET 缺失、过短或命中已知弱默认值时
+  // 启动期 fail-fast（任何环境都拒绝，不再仅 production），杜绝回退到公开默认值
+  // 'dev-collab-change-me' 导致任意 token 可伪造。凭证伪造会使全平台失守，
+  // 属数据完整性防线而非附加安全控制，不可妥协。
+  // 注意：<8 仅规则不足 —— 公开默认值恰好 16 字符，故直接把已知弱值列黑名单 + 硬性 ≥32。
+  const KNOWN_WEAK_JWT_SECRETS = new Set([
+    'dev-collab-change-me',
+    'change-me',
+    'changeme',
+    'secret',
+    'jwt-secret',
+    'changeme123',
+  ]);
+  const jwtSecret = process.env.JWT_SECRET ?? '';
+  if (!jwtSecret || jwtSecret.length < 32 || KNOWN_WEAK_JWT_SECRETS.has(jwtSecret)) {
+    throw new Error(
+      '启动失败：必须设置 JWT_SECRET（不少于 32 字符且不得使用已知默认值/弱口令，建议 openssl rand -hex 32）。' +
+        '当前值：' +
+        (jwtSecret ? '[已设置但不合规]' : '[未设置]')
+    );
   }
 
   // LLM apiKey 加密密钥 fail-fast（复刻 JWT_SECRET 模式，design.md §3）。

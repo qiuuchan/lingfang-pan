@@ -219,6 +219,16 @@ export const PLATFORM_MODULES: PermissionModuleDef[] = [
       description: '编辑平台设置（SMTP/极验/Gitee/平台信息）',
     },
   ]),
+  // RBFLow 视频/语音生成服务凭证：读取其 url + api_key。仅平台管理员
+  // （或持有本码的平台级自定义角色）可读；普通用户桌面的 RBFLow 桥平台改用
+  // X-Bridge-Token 独立通道（见 relay.service.bridgeRbflowConfig），本码不再对普通成员开放。
+  defineModule('PLATFORM', 'platform.rbflow', 'RBFLow 服务', 112, [
+    {
+      code: 'platform.rbflow.manage',
+      label: '读取 RBFLow 服务配置',
+      description: '读取 RBFLow 服务 url/api_key（供桌面桥 / 诊断使用）',
+    },
+  ]),
 ];
 
 // ============ 团队级权限（scope=TEAM）============

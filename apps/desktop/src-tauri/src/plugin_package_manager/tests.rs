@@ -60,7 +60,7 @@ fn install_for_policy(
             expected_sha256: Some(artifact.sha256.clone()),
             package_id: Some(package_id.to_string()),
             release_id: Some(release_id.to_string()),
-            origin: InstallationOrigin::Team,
+            origin: InstallationOrigin::Local,
             protected: false,
         })
         .unwrap()
@@ -234,7 +234,7 @@ fn checksum_failure_leaves_ledger_unchanged() {
         expected_sha256: Some("0".repeat(64)),
         package_id: Some("package-1".to_string()),
         release_id: Some("release-1".to_string()),
-        origin: InstallationOrigin::Team,
+        origin: InstallationOrigin::Local,
         protected: false,
     });
     assert!(result.is_err());
@@ -270,7 +270,7 @@ fn update_uses_pending_then_activation_and_rollback() {
             expected_sha256: Some(first.sha256),
             package_id: Some("package-1".to_string()),
             release_id: Some("release-1".to_string()),
-            origin: InstallationOrigin::Team,
+            origin: InstallationOrigin::Local,
             protected: false,
         })
         .unwrap();
@@ -281,7 +281,7 @@ fn update_uses_pending_then_activation_and_rollback() {
             expected_sha256: Some(second.sha256),
             package_id: Some("package-1".to_string()),
             release_id: Some("release-2".to_string()),
-            origin: InstallationOrigin::Team,
+            origin: InstallationOrigin::Local,
             protected: false,
         })
         .unwrap();
@@ -307,7 +307,7 @@ fn failed_pending_can_be_discarded_without_changing_active_release() {
             expected_sha256: Some(first.sha256),
             package_id: Some("package-1".to_string()),
             release_id: Some("release-1".to_string()),
-            origin: InstallationOrigin::Team,
+            origin: InstallationOrigin::Local,
             protected: false,
         })
         .unwrap();
@@ -318,7 +318,7 @@ fn failed_pending_can_be_discarded_without_changing_active_release() {
             expected_sha256: Some(second.sha256),
             package_id: Some("package-1".to_string()),
             release_id: Some("release-2".to_string()),
-            origin: InstallationOrigin::Team,
+            origin: InstallationOrigin::Local,
             protected: false,
         })
         .unwrap()

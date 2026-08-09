@@ -105,6 +105,18 @@ export class AuthService {
         });
       }
       return user.id;
+    }).catch((err) => {
+      // P3-1 修复：并发注册同邮箱时“先查后建”存在双写竞态——两个请求都能越过 exists 检查，
+      // 后提交的事务撞 user.email 唯一约束（P2002）并抛原始错误（500）。此处归一化为 conflict 409，
+      // 与前置 exists 检查语义一致，且事务失败自动回滚（不产生孤儿行）。
+      if (
+        (err as { code?: string; meta?: { target?: unknown } })?.code === 'P2002' &&
+        Array.isArray((err as { meta?: { target?: unknown } }).meta?.target) &&
+        (err as { meta: { target: string[] } }).meta.target.includes('email')
+      ) {
+        throw conflict('该邮箱已注册');
+      }
+      throw err;
     });
     // 注册后发送邮箱验证邮件。邮件通道失败必须显式暴露，避免用户以为验证邮件已发送。
     await this.sendVerificationEmail(userId, email);

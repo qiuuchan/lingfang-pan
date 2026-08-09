@@ -185,12 +185,18 @@ export class CreditService {
     const reserveCap = roundCredits(cap);
     const actualCredits = Math.max(0, roundCredits(realCredits));
     if (reserveCap <= 0) {
-      // 未预扣模式：事后直接扣实际额。条件扣款防透支（余额不足则扣到 0，差额不追）。
+      // 未预扣模式：事后直接扣实际额。事务 + 行锁防并发竞态（check-then-update）：
+      // 此前 findUnique→计算→update 在并发下可能都读到同一 balance，导致多线程合计扣减超过实际。
+      // 现在同一事务内 SELECT ... FOR UPDATE 锁住 TeamCredit 行，串行化同一账户的扣减。
       const actual = actualCredits;
       if (actual === 0) return 0;
       return this.prisma.$transaction(async (tx) => {
-        const account = await tx.teamCredit.findUnique({ where: { teamId } });
-        const balance = roundCredits(account?.balance ?? 0);
+        // 原生 SELECT ... FOR UPDATE 行锁（Prisma 的 findMany 不会加锁，普通 findUnique→update
+        // 在并发下会 read-then-write 竞态：多请求同时读到旧余额、各自扣减，合计超扣）。
+        const [row] = await tx.$queryRaw<{ balance: number | null }[]>`
+          SELECT "balance" FROM "TeamCredit" WHERE "teamId" = ${teamId} FOR UPDATE
+        `;
+        const balance = roundCredits(row?.balance ?? 0);
         const charge = roundCredits(Math.min(actual, Math.max(0, balance)));
         if (charge > 0) {
           await tx.teamCredit.update({

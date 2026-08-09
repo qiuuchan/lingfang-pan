@@ -100,6 +100,10 @@ export function setAuthToken(t: string | null) {
   } catch {
     /* localStorage 不可用则只更新当前会话 */
   }
+  // C1（H-6 修复配套）：token 同步落 Rust 侧文件（app_data/session.json），
+  // 与 localStorage 解耦——localStorage 被清空/禁用后重启仍可免重登。
+  // fire-and-forget：写失败（网页预览/旧壳无命令）静默降级到内存会话，不影响登录。
+  void persistAuthTokenToHost(t);
 }
 export function getAuthToken() {
   return authToken;
@@ -114,25 +118,70 @@ export function initAuthToken(): string | null {
   }
 }
 
-// Tauri 命令调用（桌面环境注入 __TAURI__，需 tauri.conf.json 开 withGlobalTauri）。
+// C1：把 token 写入 Rust 侧（webview 之外的宿主文件）。网页预览环境无 Tauri 命令 → 静默跳过。
+async function persistAuthTokenToHost(token: string | null): Promise<void> {
+  try {
+    await tauriInvoke<void>('persist_auth_token', { token });
+  } catch {
+    /* 非桌面环境或旧壳：忽略 */
+  }
+}
+
+/**
+ * C1：启动恢复——从 Rust 侧文件读取上次持久化的 token。
+ * 仅当 localStorage 无 token 时生效（localStorage 存在则以其为准，host 是兜底副本）；
+ * 命中后写回 localStorage + 内存，供 App 启动流静默刷新会话。
+ */
+export async function restoreTokenFromHost(): Promise<string | null> {
+  let token: string | null = null;
+  try {
+    token = await tauriInvoke<string | null>('read_auth_token');
+  } catch {
+    return null; // 非桌面环境/旧壳：无 host 副本
+  }
+  if (!token) return null;
+  try {
+    if (!localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)) {
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    }
+  } catch {
+    /* localStorage 不可用：host 内存即最终状态 */
+  }
+  authToken = token;
+  return token;
+}
+
+// Tauri 命令调用（桌面环境；经 @tauri-apps/api/core 模块绑定，浏览器预览环境降级报错）。
+// 不用 window.__TAURI__ 全局注入——允许 CSP 收紧 script-src 为 'self'（见 tauri.conf.json）。
+type TauriRuntime = { invoke?: Function; listen?: Function };
+let tauriRuntime: TauriRuntime | null = null;
+async function ensureTauriRuntime(): Promise<TauriRuntime> {
+  if (!tauriRuntime) {
+    const [core, event] = await Promise.all([
+      import('@tauri-apps/api/core'),
+      import('@tauri-apps/api/event'),
+    ]);
+    tauriRuntime = { invoke: core.invoke, listen: event.listen };
+  }
+  return tauriRuntime;
+}
+
 export async function tauriInvoke<T = unknown>(
   cmd: string,
   args?: Record<string, unknown>
 ): Promise<T> {
-  const inv = (window as unknown as { __TAURI__?: { core?: { invoke?: Function } } }).__TAURI__
-    ?.core?.invoke;
-  if (!inv) throw new Error('需在 灵坊 桌面环境中运行');
-  return inv(cmd, args) as Promise<T>;
+  const runtime = await ensureTauriRuntime().catch(() => null);
+  if (!runtime?.invoke) throw new Error('需在 灵坊 桌面环境中运行');
+  return runtime.invoke(cmd, args) as Promise<T>;
 }
 
 export async function tauriListen<T = unknown>(
   event: string,
   handler: (event: { payload: T }) => void
 ): Promise<() => void> {
-  const listen = (window as unknown as { __TAURI__?: { event?: { listen?: Function } } }).__TAURI__
-    ?.event?.listen;
-  if (!listen) throw new Error('需在 灵坊 桌面环境中运行');
-  return listen(event, handler) as Promise<() => void>;
+  const runtime = await ensureTauriRuntime().catch(() => null);
+  if (!runtime?.listen) throw new Error('需在 灵坊 桌面环境中运行');
+  return runtime.listen(event, handler) as Promise<() => void>;
 }
 
 // 401 全局拦截事件名（DESK-TOKEN-01 / DESK-03 修复）：

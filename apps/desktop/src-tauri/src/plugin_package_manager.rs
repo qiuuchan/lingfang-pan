@@ -15,6 +15,7 @@ use crate::plugin_artifact_v4::{
     collect_workspace_source_files, extract_artifact, inspect_artifact, package_workspace,
     sha256_bytes, sha256_file, InspectedArtifact,
 };
+use crate::plugin_security;
 use crate::plugin_store::{read_json, write_json, PluginStore};
 
 pub(crate) mod commands;
@@ -493,6 +494,10 @@ impl PluginPackageManager {
             events.drain(..events.len() - 2_000);
         }
         let _ = write_json(&self.audit_path(), &events);
+    }
+
+    pub(crate) fn plugins_root_dir(&self) -> PathBuf {
+        self.plugins_root.clone()
     }
 
     fn installed_root(&self) -> PathBuf {
@@ -1109,6 +1114,17 @@ impl PluginPackageManager {
         if let Err(error) = extract_artifact(&artifact_path, &staging_package) {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
+        }
+        // M-3/P1-2：远端 Team/Marketplace 发布链路强制签名（fail-closed）后才落盘提交。
+        if matches!(input.origin, InstallationOrigin::Team | InstallationOrigin::Marketplace) {
+            if let Err(error) = crate::plugin_security::enforce_signature_gate(
+                &self.plugins_root,
+                &staging_package,
+                true,
+            ) {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(error);
+            }
         }
         let shared_data = installation_root.join("data");
         if let Err(error) = fs::create_dir_all(&shared_data) {

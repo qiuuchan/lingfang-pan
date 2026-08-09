@@ -30,6 +30,7 @@ use tauri::WindowEvent;
 use tauri::{Emitter, Manager};
 
 use capability::CapabilityRegistry;
+use plugin_llm_bridge::BRIDGE_TOKEN_FILENAME;
 use plugins::LoadedPlugin;
 
 /// 从完整 URL 中提取主机名（含 IPv6 的 `[..]` 包裹形式）。
@@ -105,6 +106,132 @@ fn toggle_devtools(app: tauri::AppHandle) {
             window.open_devtools();
         }
     }
+}
+
+/// C1（H-6 修复配套）：认证会话 token 持久化到 Rust 侧文件（app_data/session.json），
+/// 与 webview localStorage 解耦。此前 token 仅存 localStorage，用户清理浏览器缓存 /
+/// localStorage 被系统策略清空后必须重新登录；现在启动时可由 Rust 恢复（免重登）。
+///
+/// token=None 表示删除（登出/失效）；token=Some 覆盖写。全量 JSON 小文件，原子写 +
+/// Unix 下 0600 权限（仅当前用户可读）。文件被篡改时的最坏后果是「恢复到一个失效 token」，
+/// 由 /api/auth/me 的 401 拦截兜底登出，与 localStorage 里的 token 同信任级别。
+const SESSION_TOKEN_FILENAME: &str = "session.json";
+
+fn session_token_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法定位应用数据目录：{e}"))?
+        .join(SESSION_TOKEN_FILENAME))
+}
+
+#[tauri::command]
+fn persist_auth_token(app: tauri::AppHandle, token: Option<String>) -> Result<(), String> {
+    let path = session_token_path(&app)?;
+    match token {
+        Some(t) => {
+            let trimmed = t.trim();
+            if trimmed.is_empty() {
+                return Err("token 为空，拒绝写入".to_string());
+            }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("无法创建应用数据目录：{e}"))?;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut opts = std::fs::OpenOptions::new();
+                opts.create(true).truncate(true).write(true).mode(0o600);
+                let file = opts.open(&path).map_err(|e| format!("无法打开会话文件：{e}"))?;
+                serde_json::to_writer(
+                    file,
+                    &serde_json::json!({ "token": trimmed }),
+                )
+                .map_err(|e| format!("写入会话文件失败：{e}"))?;
+                return Ok(());
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::write(&path, serde_json::to_vec(&serde_json::json!({ "token": trimmed })).map_err(|e| e.to_string())?)
+                    .map_err(|e| format!("写入会话文件失败：{e}"))?;
+            }
+            Ok(())
+        }
+        None => {
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|e| format!("删除会话文件失败：{e}"))?;
+            }
+            Ok(())
+        }
+    }
+}
+
+#[tauri::command]
+fn read_auth_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let path = session_token_path(&app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取会话文件失败：{e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("会话文件格式损坏：{e}"))?;
+    let token = value.get("token").and_then(|v| v.as_str()).map(|s| s.to_string());
+    Ok(token.filter(|t| !t.trim().is_empty()))
+}
+
+/// H-3：配置/删除本机「RBFlow 桥接令牌」（app_data/bridge_token.txt，Unix 0600）。
+/// 令牌由平台管理员在后台配置（PlatformSetting.rbflowBridgeToken），部署时填到桌面端；
+/// 桥进程用它与 relay 的 X-Bridge-Token 通道交换 RBFLow 转发凭证（不等同用户 JWT）。
+#[tauri::command]
+fn set_bridge_token(app: tauri::AppHandle, token: Option<String>) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录失败：{e}"))?;
+    let path = dir.join(BRIDGE_TOKEN_FILENAME);
+    match token {
+        Some(t) => {
+            let trimmed = t.trim();
+            if trimmed.is_empty() {
+                return Err("桥接令牌为空，拒绝写入".to_string());
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut opts = std::fs::OpenOptions::new();
+                opts.create(true).truncate(true).write(true).mode(0o600);
+                use std::io::Write;
+                let mut file = opts
+                    .open(&path)
+                    .map_err(|e| format!("无法打开桥接令牌文件：{e}"))?;
+                file.write_all(trimmed.as_bytes())
+                    .map_err(|e| format!("写入桥接令牌失败：{e}"))?;
+                return Ok(());
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::write(&path, trimmed.as_bytes())
+                    .map_err(|e| format!("写入桥接令牌失败：{e}"))?;
+            }
+            Ok(())
+        }
+        None => {
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|e| format!("删除桥接令牌失败：{e}"))?;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// H-3：读取本机已配置的桥接令牌（前端设置页展示"是否已配置"用，不返回明文）。
+#[tauri::command]
+fn has_bridge_token(app: tauri::AppHandle) -> Result<bool, String> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(BRIDGE_TOKEN_FILENAME);
+    let raw = std::fs::read_to_string(&path).unwrap_or_default();
+    Ok(!raw.trim().is_empty())
 }
 
 /// 命令：启动内置脚本插件（builtin-plugins 下的 nodejs/python）。
@@ -392,7 +519,10 @@ fn main() {
             app.manage(plugin_runner::PluginProcessTable::new());
             // task 06-26：Node/Python 插件通过 localhost 一次性 token 调平台 LLM；
             // 桥持有后端地址与登录态，插件进程不直接接触 JWT/API Key。
-            app.manage(plugin_llm_bridge::PluginLlmBridge::new());
+            // H-3：注入 app_data_dir，供桥读本机「RBFlow 桥接令牌」（bridge_token.txt）。
+            let mut plugin_bridge = plugin_llm_bridge::PluginLlmBridge::new();
+            plugin_bridge.with_app_data_dir(app.path().app_data_dir().map_err(|e| e.to_string())?);
+            app.manage(plugin_bridge);
             // 本地定时任务（local-scheduler）：内存状态 + 文件存储 + 60s tick + 串行执行。
             // 任务配置落 app_data_dir/scheduler/tasks/<id>/；runs.jsonl 保留最近 200 条。
             // 三种 payload：AGENT_PROMPT（emit 给前端常驻组件）/ PLUGIN_ACTION（二期）/ NOTIFY（直接 emit 通知）。
@@ -421,6 +551,10 @@ fn main() {
             quit_app,
             list_plugins,
             toggle_devtools,
+            persist_auth_token,
+            read_auth_token,
+            set_bridge_token,
+            has_bridge_token,
             start_builtin_plugin,
             read_plugin_file,
             invoke_capability,

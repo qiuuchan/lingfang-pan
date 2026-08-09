@@ -201,13 +201,34 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
     if (v.length > 500) throw badRequest('rbflowUrl 过长（上限 500 字符）');
     return v;
   },
-  // 组F RBFLow 静态 API-KEY（服务端转发用，非用户可见）。与 giteeAccessToken 同款 URL-safe 字符校验。
+// 组F RBFLow 静态 API-KEY（服务端转发用，非用户可见）。与 giteeAccessToken 同款 URL-safe 字符校验。
   // 允许空（未配置=桥报 503 rbflow_not_configured）。
   rbflowApiKey: (raw) => {
     const v = raw.trim();
     if (v && !/^[A-Za-z0-9_-]{10,200}$/.test(v))
       throw badRequest('rbflowApiKey 格式不合法（仅允许字母数字、下划线、连字符，10~200 字符）');
     return v;
+  },
+  // 组F RBFLow 桌面桥接令牌：桌面桥本地进程用它换取 RBFLow 转发凭证（X-Bridge-Token 头）。
+  // 仅平台管理员可配置/查看（见 REVEALABLE_SECRET_KEYS），普通用户不可见——防异步端点外泄 api_key。
+  // 复用 URL-safe 字符校验（与 giteeAccessToken 同款强度），长度 16~200（随机高强度，恒 >=16）。
+  rbflowBridgeToken: (raw) => {
+    const v = raw.trim();
+    if (v && !/^[A-Za-z0-9_-]{16,200}$/.test(v))
+      throw badRequest(
+        'rbflowBridgeToken 格式不合法（仅允许字母数字、下划线、连字符，16~200 字符）'
+      );
+    return v;
+  },
+  // 组F 视频单次计费秒数上限（秒）：服务端 clamp 客户端上报的 seconds（防刷计价）。
+  // 正整数 1~3600；空值=清空回退默认 300（见 relay.service.VideoMaxSecondsDefault）。
+  videoMaxSeconds: (raw) => {
+    const v = raw.trim();
+    if (v === '') return v;
+    const n = Number.parseInt(v, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 3600)
+      throw badRequest('videoMaxSeconds 必须是 1~3600 的整数（秒）');
+    return String(n);
   },
 };
 
@@ -237,6 +258,7 @@ const SECRET_KEYS = new Set([
   'tavilyApiKey',
   'braveApiKey',
   'rbflowApiKey',
+  'rbflowBridgeToken',
 ]);
 
 /** 影响 MailService SMTP / 品牌缓存的 PlatformSetting key 集合。
@@ -285,14 +307,22 @@ export class SettingsService {
   ) {}
 
   /** GET /api/admin/settings：返回全部设置项（Admin 视角，含 description + updatedById）。
-   *  数组返回而非对象——管理后台需展示 description/updatedAt/updatedBy，对象形式无法承载这些元字段。 */
+   *  密钥类 key（SECRET_KEYS）一律脱敏返回占位符（防 SMTP/极验/Gitee/RBFLow 明文经此接口泄漏
+   *  到浏览器/日志）；真实值仅经 reveal-secret（二次密码确认）读取。数组返回而非对象——
+   *  管理后台需展示 description/updatedAt/updatedBy，对象形式无法承载这些元字段。 */
   async getSettings(userId: string) {
     await this.auth.ensurePlatformAdmin(userId);
     const settings = await this.prisma.platformSetting.findMany({
       orderBy: { key: 'asc' },
       select: { key: true, value: true, description: true, updatedAt: true, updatedById: true },
     });
-    return { settings };
+    return {
+      settings: settings.map((s) =>
+        SECRET_KEYS.has(s.key)
+          ? { ...s, value: s.value ? '••••••（已配置，见 reveal-secret）' : '' }
+          : s
+      ),
+    };
   }
 
   /** PATCH /api/admin/settings：批量 upsert（不存在创建，存在覆写 value）。

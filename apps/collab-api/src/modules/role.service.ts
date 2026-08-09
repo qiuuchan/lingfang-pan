@@ -177,6 +177,8 @@ export class RoleService {
   ) {
     await this.auth.ensurePermission(userId, 'platform.role.manage');
     const permissions = this.validatePermissions(input.permissions ?? [], 'PLATFORM');
+    // H-4：角色权限不得超过创建者自身权限集（防造超权角色再分配给他人＝间接提权）。
+    await this.assertPermissionsWithinActor(userId, permissions);
     const existing = await this.prisma.role.findFirst({
       where: { scope: 'PLATFORM', name: input.name },
       select: { id: true },
@@ -239,7 +241,10 @@ export class RoleService {
     if (input.description !== undefined) data.description = input.description;
     if (input.permissions !== undefined) {
       if (role.isSystem) throw forbidden('内置角色权限不可修改');
-      data.permissions = this.validatePermissions(input.permissions, 'PLATFORM');
+      const permissions = this.validatePermissions(input.permissions, 'PLATFORM');
+      // H-4：编辑后权限不得超过编辑者自身权限集（防造超权角色再分配给他人＝间接提权）。
+      await this.assertPermissionsWithinActor(userId, permissions);
+      data.permissions = permissions;
     }
 
     const updated = await this.prisma.role.update({ where: { id: roleId }, data });
@@ -263,7 +268,9 @@ export class RoleService {
     return { ok: true };
   }
 
-  /** 为用户分配/撤销平台角色。需 platform.user.role.assign 权限。 */
+  /** 为用户分配/撤销平台角色。需 platform.user.role.assign 权限。
+   *  H-4 收紧：分配系统平台管理员角色 → 仅当前平台管理员本人可分配（防低权限后端角色提权）；
+   *  分配自定义角色 → 要求分配者自身权限集为目标角色权限集的超集（不得分配高于自己的权限）。 */
   async assignPlatformRole(userId: string, targetUserId: string, roleId: string | null) {
     await this.auth.ensurePermission(userId, 'platform.user.role.assign');
     const target = await this.prisma.user.findUnique({ where: { id: targetUserId } });
@@ -271,6 +278,30 @@ export class RoleService {
     if (roleId !== null) {
       const role = await this.prisma.role.findUnique({ where: { id: roleId } });
       if (!role || role.scope !== 'PLATFORM') throw badRequest('平台角色不存在');
+      // H-4：系统平台管理员角色（全量权限）只能由平台管理员本人/同角色分配。
+      if (role.id === SYSTEM_PLATFORM_ADMIN_ROLE_ID && role.isSystem) {
+        const actor = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { platformRole: true, platformRoleId: true },
+        });
+        const actorIsPlatformAdmin =
+          actor?.platformRole === 'PLATFORM_ADMIN' &&
+          actor.platformRoleId === SYSTEM_PLATFORM_ADMIN_ROLE_ID;
+        if (!actorIsPlatformAdmin) {
+          throw forbidden('仅平台管理员可分配系统平台管理员角色');
+        }
+      } else {
+        // 自定义平台角色：分配者权限集必须 ⊇ 目标角色权限集（防低权限角色分配高权限角色）。
+        const targetPerms = role.permissions ?? [];
+        if (targetPerms.length > 0) {
+          const { perms } = await this.auth.ensurePermission(userId, ...targetPerms);
+          // ensurePermission(OR) 语义：任一命中即放行，此处须是「全部命中」= 权限超集。
+          const missing = targetPerms.filter((code) => !perms.has(code));
+          if (missing.length > 0) {
+            throw forbidden(`不能分配包含高于自身权限的角色（缺少：${missing.join('、')}）`);
+          }
+        }
+      }
     }
     await this.prisma.user.update({
       where: { id: targetUserId },
@@ -326,6 +357,8 @@ export class RoleService {
     await this.auth.ensurePermission(userId, 'team.role.create');
     const m = await this.resolveCurrentTeam(userId);
     const permissions = this.validatePermissions(input.permissions ?? [], 'TEAM');
+    // H-4：角色权限不得超过创建者自身权限集。
+    await this.assertPermissionsWithinActor(userId, permissions);
     const existing = await this.prisma.role.findFirst({
       where: { scope: 'TEAM', teamId: m.teamId, name: input.name },
     });
@@ -390,7 +423,10 @@ export class RoleService {
     if (input.description !== undefined) data.description = input.description;
     if (input.permissions !== undefined) {
       if (role.isSystem) throw forbidden('内置角色权限不可修改');
-      data.permissions = this.validatePermissions(input.permissions, 'TEAM');
+      const permissions = this.validatePermissions(input.permissions, 'TEAM');
+      // H-4：编辑后权限不得超过编辑者自身权限集。
+      await this.assertPermissionsWithinActor(userId, permissions);
+      data.permissions = permissions;
     }
 
     const updated = await this.prisma.role.update({ where: { id: roleId }, data });
@@ -423,7 +459,9 @@ export class RoleService {
     return { ok: true };
   }
 
-  /** 为团队成员分配团队角色。需 team.member.role.assign 权限。 */
+  /** 为团队成员分配团队角色。需 team.member.role.assign 权限。
+   *  H-4 收紧：系统团队管理员角色（isSystem + team_admin）仅团队管理员（TEAM_ADMIN）可分配；
+   *  自定义角色要求分配者权限集 ⊇ 目标角色权限集（防提权）。 */
   async assignMemberRole(userId: string, targetUserId: string, roleId: string) {
     await this.auth.ensurePermission(userId, 'team.member.role.assign');
     const m = await this.resolveCurrentTeam(userId);
@@ -434,6 +472,19 @@ export class RoleService {
       where: { teamId_userId: { teamId: m.teamId, userId: targetUserId } },
     });
     if (!target || target.status !== 'ACTIVE') throw notFound('团队成员不存在');
+
+    // H-4：系统团队管理员角色仅团队管理员可分配（防普通成员给自己/他人开管理员）。
+    if (role.isSystem && role.code === SYSTEM_TEAM_ADMIN_ROLE_CODE) {
+      if (m.role !== 'TEAM_ADMIN') throw forbidden('仅团队管理员可分配系统团队管理员角色');
+    } else if ((role.permissions ?? []).length > 0) {
+      // 自定义团队角色：分配者权限集必须 ⊇ 目标角色权限集（防低权限角色分配高权限角色）。
+      const targetPerms = role.permissions ?? [];
+      const { perms } = await this.auth.ensurePermission(userId, ...targetPerms);
+      const missing = targetPerms.filter((code) => !perms.has(code));
+      if (missing.length > 0) {
+        throw forbidden(`不能分配包含高于自身权限的角色（缺少：${missing.join('、')}）`);
+      }
+    }
 
     // 迁移期双写：teamRole 枚举同步（系统团队管理员→TEAM_ADMIN，否则 MEMBER）
     // 基于 code 检测（不依赖 name 字符串，更稳健，见 SYSTEM_TEAM_ADMIN_ROLE_CODE）
@@ -652,6 +703,17 @@ export class RoleService {
   }
 
   // ============ 内部 helper ============
+
+  /** H-4：校验目标权限集不超过「当前用户」权限集（平台角色 + 当前团队角色合并）。
+   *  防止低权限角色创建/编辑出高权限角色后分配给他人（间接提权）。 */
+  private async assertPermissionsWithinActor(userId: string, targetCodes: string[]): Promise<void> {
+    if (targetCodes.length === 0) return;
+    const { perms } = await this.auth.ensurePermission(userId, ...targetCodes);
+    const missing = targetCodes.filter((code) => !perms.has(code));
+    if (missing.length > 0) {
+      throw forbidden(`权限超出当前用户权限范围（缺少：${missing.join('、')}）`);
+    }
+  }
 
   /** 校验权限码：必须在注册表白名单 + scope 匹配（团队角色只能用 team.* 码）。 */
   private validatePermissions(codes: string[], scope: PermissionScope): string[] {

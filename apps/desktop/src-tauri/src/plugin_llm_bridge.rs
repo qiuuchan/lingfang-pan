@@ -41,6 +41,7 @@ struct BridgeSession {
     plugin_id: String,
     api_base: String,
     auth_token: String,
+    bridge_token: String,
     allow_llm_chat: bool,
     allow_image_generate: bool,
     allow_image_edit: bool,
@@ -71,7 +72,10 @@ struct BridgeState {
 #[derive(Clone, Default)]
 pub struct PluginLlmBridge {
     inner: Arc<BridgeState>,
+    app_data_dir: Option<Arc<std::path::PathBuf>>,
 }
+
+pub const BRIDGE_TOKEN_FILENAME: &str = "bridge_token.txt";
 
 #[derive(Clone, Debug)]
 pub struct PluginBridgeEnv {
@@ -152,6 +156,20 @@ impl PluginLlmBridge {
         Self::default()
     }
 
+    pub fn with_app_data_dir(&mut self, dir: std::path::PathBuf) {
+        self.app_data_dir = Some(Arc::new(dir));
+    }
+
+    fn read_bridge_token(&self) -> String {
+        let Some(dir) = &self.app_data_dir else {
+            return String::new();
+        };
+        let path = dir.join(BRIDGE_TOKEN_FILENAME);
+        std::fs::read_to_string(&path)
+            .map(|raw| raw.trim().to_string())
+            .unwrap_or_default()
+    }
+
     /// 注册一次插件脚本会话。返回给子进程的只有 localhost endpoint（基础地址）与会话 token。
     /// 子进程经 SDK invokeScriptBridge 拼具体路径（/llm/chat、/image/generate）。
     pub fn register_session(
@@ -182,6 +200,7 @@ impl PluginLlmBridge {
             plugin_id: plugin_id.to_string(),
             api_base,
             auth_token,
+            bridge_token: self.read_bridge_token(),
             allow_llm_chat,
             allow_image_generate,
             allow_image_edit,
@@ -235,6 +254,7 @@ impl PluginLlmBridge {
                     plugin_id: plugin_id.to_string(),
                     api_base: api_base.trim().trim_end_matches('/').to_string(),
                     auth_token: auth_token.trim().to_string(),
+                    bridge_token: self.read_bridge_token(),
                     allow_llm_chat: false,
                     allow_image_generate: false,
                     allow_image_edit: false,
@@ -375,6 +395,7 @@ pub fn respond_plugin_action_bridge(
 /// SSE 用于 `stream: true` 的 /v1/chat/completions 请求：桥从 relay 拿完整响应后，
 /// 包装成单个 `data:` 事件 + `data: [DONE]` 返回，兼容 OpenAI SDK 的流式消费。
 /// 非真正流式（relay 固定非流式），但解除了插件 SDK `stream: true` 的 400 报错。
+#[derive(Debug)]
 enum BridgeResponse {
     Json(Value),
     Sse(String),
@@ -1867,8 +1888,39 @@ struct RbflowCredentials {
 }
 
 fn read_rbflow_credential(session: &BridgeSession) -> Result<RbflowCredentials, String> {
-    let data = relay_get_json(session, "/api/relay/v1/rbflow-config")
-        .map_err(|e| format!("读取 RBFLow 配置失败：{}", e.message))?;
+    let bridge_token = session.bridge_token.trim();
+    if bridge_token.is_empty() {
+        return Err(
+            "本机未配置桥接令牌：请在桌面端设置中填写管理员下发的「RBFlow 桥接令牌」".to_string(),
+        );
+    }
+    // H-3：桥接令牌通道：POST /api/relay/v1/bridge/rbflow-credential + X-Bridge-Token
+    //（rbflow-config 已收紧到 platform.rbflow.manage，普通成员桌面桥不再走该端点）。
+    let data = relay_with_retry(|| {
+        let request_id = Uuid::new_v4().to_string();
+        let url = format!(
+            "{}/api/relay/v1/bridge/rbflow-credential",
+            session.api_base.trim_end_matches('/')
+        );
+        let response = blocking_client()
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("X-Client", session.client_source.x_client())
+            .header("X-Request-Id", &request_id)
+            .header("X-Bridge-Token", bridge_token)
+            .bearer_auth(&session.auth_token)
+            .send()
+            .map_err(|_| {
+                BridgeError::new(
+                    502,
+                    "relay_request_failed",
+                    "无法连接平台模型服务，请稍后重试",
+                )
+                .with_request_id(request_id.clone())
+            })?;
+        relay_response_json(response, &request_id)
+    })
+    .map_err(|e| format!("读取 RBFLow 配置失败：{}", e.message))?;
     let url = data
         .get("url")
         .and_then(Value::as_str)
@@ -2272,6 +2324,7 @@ mod tests {
             plugin_id: "test-plugin".to_string(),
             api_base: endpoint,
             auth_token: "jwt".to_string(),
+            bridge_token: "test-bridge".to_string(),
             allow_llm_chat: true,
             allow_image_generate: false,
             allow_image_edit: false,
@@ -2309,6 +2362,7 @@ mod tests {
             plugin_id: "test-plugin".to_string(),
             api_base: endpoint,
             auth_token: "secret-jwt".to_string(),
+            bridge_token: "test-bridge".to_string(),
             allow_llm_chat: false,
             allow_image_generate: false,
             allow_image_edit: false,
@@ -2349,14 +2403,20 @@ mod tests {
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("应收到测试 relay 请求");
-            let request = read_request(&mut stream).expect("测试 relay 请求应有效");
-            tx.send(request).expect("应回传测试请求");
-            let response = http_json(status, &body);
-            stream
-                .write_all(response.as_bytes())
-                .expect("应写入测试 relay 响应");
-            stream.flush().expect("应刷新测试 relay 响应");
+            // 循环 T：relay_with_retry 对 502/503 会重试（最多 3 次），一旦 mock 只 accept
+            // 一次，重试的第二次连接将因无处 accept 而失败并被包裹成 relay_request_failed，
+            // 破坏「relay 上游错误透传」类断言。每次连接都发送同一响应，直到 listener 关闭。
+            loop {
+                let Ok((mut stream, _)) = listener.accept() else { break };
+                if let Ok(request) = read_request(&mut stream) {
+                    let _ = tx.send(request);
+                }
+                let response = http_json(status, &body);
+                if stream.write_all(response.as_bytes()).is_err() {
+                    break;
+                }
+                let _ = stream.flush();
+            }
         });
         (endpoint, rx)
     }
@@ -2377,6 +2437,7 @@ mod tests {
             plugin_id: "test-plugin".to_string(),
             api_base: endpoint,
             auth_token: "jwt".to_string(),
+            bridge_token: "test-bridge".to_string(),
             allow_llm_chat: true,
             allow_image_generate: false,
             allow_image_edit: false,
@@ -2457,6 +2518,7 @@ mod tests {
                     plugin_id: "test-plugin".to_string(),
                     api_base: "http://127.0.0.1:0".to_string(),
                     auth_token: "dummy".to_string(),
+                    bridge_token: "test-bridge".to_string(),
                     allow_llm_chat: allow_llm,
                     allow_image_generate: allow_image,
                     allow_image_edit: false,
@@ -2592,6 +2654,7 @@ mod tests {
             plugin_id: "test-plugin".to_string(),
             api_base: endpoint,
             auth_token: "jwt".to_string(),
+            bridge_token: "test-bridge".to_string(),
             allow_llm_chat: false,
             allow_image_generate: false,
             allow_image_edit: true,
@@ -2652,6 +2715,7 @@ mod tests {
             plugin_id: "test-plugin".to_string(),
             api_base: endpoint,
             auth_token: "jwt".to_string(),
+            bridge_token: "test-bridge".to_string(),
             allow_llm_chat: false,
             allow_image_generate: false,
             allow_image_edit: true,
@@ -2691,6 +2755,7 @@ mod tests {
             plugin_id: "test-plugin".to_string(),
             api_base: endpoint,
             auth_token: "jwt".to_string(),
+            bridge_token: "test-bridge".to_string(),
             allow_llm_chat: false,
             allow_image_generate: false,
             allow_image_edit: true,
@@ -2723,6 +2788,7 @@ mod tests {
             plugin_id: "test-plugin".to_string(),
             api_base: endpoint,
             auth_token: "jwt".to_string(),
+            bridge_token: "test-bridge".to_string(),
             allow_llm_chat: false,
             allow_image_generate: false,
             allow_image_edit: false,

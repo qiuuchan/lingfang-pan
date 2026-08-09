@@ -28,6 +28,13 @@ import { UpstreamError } from './forwarders';
 
 const forwardOpenAiChat = forwarders.forwardOpenAiChat as unknown as ReturnType<typeof vi.fn>;
 
+/** AuthService 模拟：默认「无任何平台权限」；需要时按测试覆盖 ensurePermission / perms 集合。 */
+function makeAuth() {
+  return {
+    ensurePermission: vi.fn(async () => ({ perms: new Set<string>() })),
+  } as never;
+}
+
 /** CreditService 模拟：用「团队余额净变化（net）」状态机精确反映 reserve/reconcile/refund 的资金效果。 */
 function makeCredits(cap: number, opts: { reserveThrows?: boolean; cap0Balance?: number } = {}) {
   let net = 0; // 相对调用前的团队余额净变化（应在失败路径恒为 0）
@@ -116,7 +123,7 @@ function build(cap: number, opts: Parameters<typeof makeCredits>[1] = {}) {
     })),
   };
   // @ts-expect-error mock 不实现完整接口，仅测用到的方法。
-  const svc = new RelayService(prisma, pricing, credits, router);
+  const svc = new RelayService(prisma, pricing, credits, router, makeAuth());
   return { svc, prisma, credits, pricing, router };
 }
 
@@ -513,7 +520,7 @@ function buildVideo(
     llmCallLog: {
       create: vi.fn(async () => ({ id: 'vlog1' })),
       update: vi.fn(async () => ({})),
-      findFirst: vi.fn(async () => ({ id: 'vlog1', status: 'success', credits: expectedCredits })),
+      findFirst: vi.fn(async () => ({ id: 'vlog1', status: 'client_error', credits: expectedCredits })),
     },
     // forwardToRbflow 读 RBFLow 配置（rbflowUrl/rbflowApiKey）。空 rbflowUrl=未配置。
     platformSetting: {
@@ -525,6 +532,8 @@ function buildVideo(
               { key: 'rbflowApiKey', value: 'test-key' },
             ]
       ),
+      // readVideoMaxSeconds / bridgeRbflowConfig 读单键（readVideoMaxSeconds：缺失→默认 300）。
+      findUnique: vi.fn(async () => null),
     },
   } as never;
   const credits = makeCredits(expectedCredits, { reserveThrows: opts.reserveThrows });
@@ -542,7 +551,7 @@ function buildVideo(
     decryptUpstreamKey: vi.fn(async () => ({})),
   } as never;
   // @ts-expect-error mock 不实现完整接口。
-  const svc = new RelayService(prisma, pricing, credits, router);
+  const svc = new RelayService(prisma, pricing, credits, router, makeAuth());
   return { svc, prisma, credits, pricing, expectedCredits };
 }
 
@@ -634,7 +643,10 @@ describe('RelayService.videoGenerations 按秒计费 + RBFLow 转发', () => {
   it('无定价抛 503 no_pricing 且不建计费日志', async () => {
     const prisma = {
       llmCallLog: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn() },
-      platformSetting: { findMany: vi.fn() },
+      platformSetting: {
+        findMany: vi.fn(),
+        findUnique: vi.fn(async () => null), // readVideoMaxSeconds
+      },
     } as never;
     const credits = makeCredits(10);
     const pricing = {
@@ -644,7 +656,7 @@ describe('RelayService.videoGenerations 按秒计费 + RBFLow 转发', () => {
     } as never;
     const router = { selectCandidates: vi.fn(), decryptUpstreamKey: vi.fn() } as never;
     // @ts-expect-error mock
-    const svc = new RelayService(prisma, pricing, credits, router);
+    const svc = new RelayService(prisma, pricing, credits, router, makeAuth());
     await expect(
       svc.videoGenerations(makeReq(), { model: 'fast', seconds: 10 })
     ).rejects.toMatchObject({ status: 503, code: 'no_pricing' });
@@ -683,6 +695,36 @@ describe('RelayService.videoGenerations 按秒计费 + RBFLow 转发', () => {
   });
 });
 
+describe('RelayService.bridgeRbflowConfig 桥接凭证通道（H-3）', () => {
+  it('携带正确 X-Bridge-Token → 返回 rbflow 配置（url + api_key）', async () => {
+    const { svc, prisma } = buildVideo(10, { rbflowStatus: 200, rbflowBody: {} });
+    prisma.platformSetting.findUnique.mockResolvedValue({ value: 'secret-bridge-token' });
+    const out = await svc.bridgeRbflowConfig({
+      relayAuth: { teamId: 't1', userId: 'u1' },
+      header: (name: string) => (name === 'x-bridge-token' ? 'secret-bridge-token' : undefined),
+    } as never);
+    expect(out).toMatchObject({ url: 'http://rbflow.test:41792', api_key: 'test-key' });
+  });
+
+  it('缺少 X-Bridge-Token → 400 bad_request', async () => {
+    const { svc } = buildVideo(10, { rbflowStatus: 200, rbflowBody: {} });
+    await expect(
+      svc.bridgeRbflowConfig({ relayAuth: { teamId: 't1', userId: 'u1' }, header: () => undefined } as never)
+    ).rejects.toMatchObject({ status: 400, code: 'bad_request' });
+  });
+
+  it('令牌不匹配/未配置 → 403 bridge_token_invalid', async () => {
+    const { svc } = buildVideo(10, { rbflowStatus: 200, rbflowBody: {} });
+    // 未配置（findUnique 返 null）→ 403
+    await expect(
+      svc.bridgeRbflowConfig({
+        relayAuth: { teamId: 't1', userId: 'u1' },
+        header: () => 'wrong',
+      } as never)
+    ).rejects.toMatchObject({ status: 403, code: 'bridge_token_invalid' });
+  });
+});
+
 describe('RelayService.refundVideo 视频退款', () => {
   it('凭 call_log_id 调 refundConsumed 退款，finalize status=refunded', async () => {
     const { svc, credits, prisma } = buildVideo(10);
@@ -717,6 +759,21 @@ describe('RelayService.refundVideo 视频退款', () => {
     expect(out.refunded).toBe(false);
     expect(prisma.llmCallLog.update).not.toHaveBeenCalled();
   });
+
+  it('H-2 门禁：status=success 已成功交付 → 409 refund_rejected，不退款', async () => {
+    const { svc, prisma, credits } = buildVideo(10);
+    prisma.llmCallLog.findFirst.mockResolvedValueOnce({
+      id: 'vlog1',
+      status: 'success',
+      credits: 5,
+    });
+    await expect(svc.refundVideo(makeReq(), { call_log_id: 'vlog1' })).rejects.toMatchObject({
+      status: 409,
+      code: 'refund_rejected',
+    });
+    expect(credits.refundConsumed).not.toHaveBeenCalled();
+    expect(prisma.llmCallLog.update).not.toHaveBeenCalled();
+  });
 });
 
 // === 声音克隆按输出秒数计费（PER_SECOND，秒数由 relay 从 prompt_text 估算） ===
@@ -738,7 +795,7 @@ function buildAudio(
     llmCallLog: {
       create: vi.fn(async () => ({ id: 'alog1' })),
       update: vi.fn(async () => ({})),
-      findFirst: vi.fn(async () => ({ id: 'alog1', status: 'success', credits: expectedCredits })),
+      findFirst: vi.fn(async () => ({ id: 'alog1', status: 'client_error', credits: expectedCredits })),
     },
     platformSetting: {
       findMany: vi.fn(async () =>
@@ -749,6 +806,7 @@ function buildAudio(
               { key: 'rbflowApiKey', value: 'test-key' },
             ]
       ),
+      findUnique: vi.fn(async () => null), // readVideoMaxSeconds / bridgeRbflowConfig
     },
   } as never;
   const credits = makeCredits(expectedCredits, { reserveThrows: opts.reserveThrows });
@@ -765,7 +823,7 @@ function buildAudio(
     decryptUpstreamKey: vi.fn(async () => ({})),
   } as never;
   // @ts-expect-error mock 不实现完整接口。
-  const svc = new RelayService(prisma, pricing, credits, router);
+  const svc = new RelayService(prisma, pricing, credits, router, makeAuth());
   return { svc, prisma, credits, pricing, expectedCredits, seconds };
 }
 
@@ -860,7 +918,7 @@ describe('RelayService.audioGenerations 按输出秒数计费 + RBFLow /tasks/vo
     } as never;
     const router = { selectCandidates: vi.fn(), decryptUpstreamKey: vi.fn() } as never;
     // @ts-expect-error mock
-    const svc = new RelayService(prisma, pricing, credits, router);
+    const svc = new RelayService(prisma, pricing, credits, router, makeAuth());
     await expect(
       svc.audioGenerations(makeReq(), { model: 'fast', audio: 'aGk=', prompt_text: '你好' })
     ).rejects.toMatchObject({ status: 503, code: 'no_pricing' });
@@ -925,5 +983,20 @@ describe('RelayService.refundAudio 音频退款', () => {
       status: 404,
       code: 'not_found',
     });
+  });
+
+  it('H-2 门禁：status=success 已成功交付 → 409 refund_rejected，不退款', async () => {
+    const { svc, prisma, credits } = buildAudio('字'.repeat(10));
+    prisma.llmCallLog.findFirst.mockResolvedValueOnce({
+      id: 'alog1',
+      status: 'success',
+      credits: 5,
+    });
+    await expect(svc.refundAudio(makeReq(), { call_log_id: 'alog1' })).rejects.toMatchObject({
+      status: 409,
+      code: 'refund_rejected',
+    });
+    expect(credits.refundConsumed).not.toHaveBeenCalled();
+    expect(prisma.llmCallLog.update).not.toHaveBeenCalled();
   });
 });

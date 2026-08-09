@@ -1505,6 +1505,24 @@ pub(crate) fn start_plugin_from_dir(
         log_launch(format!("manifest 解析失败：{e}"));
         e
     })?;
+    // M-3/P1-2：组A 目录直启通道统一强制签名（草稿豁免）。
+    // 不在 plugins_root 的目录视为官方内置 bundle（注册时已鉴权），跳过强制。
+    {
+        use tauri::Manager;
+        let store = app.state::<PluginStore>();
+        let root = store.plugins_root();
+        let root_norm = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+        if plugin_dir.starts_with(&root_norm) || plugin_dir.starts_with(&root) {
+            crate::plugin_security::enforce_signature_gate(&root, &plugin_dir, true).map_err(
+                |e| {
+                    log_launch(format!("签名校验失败：{e}"));
+                    e
+                },
+            )?;
+        } else {
+            log_launch("插件目录不在 plugins_root（内置 bundle），跳过签名强制".to_string());
+        }
+    }
     log_launch(format!(
         "manifest: runtime={:?} entry={}",
         manifest.runtime, manifest.entry

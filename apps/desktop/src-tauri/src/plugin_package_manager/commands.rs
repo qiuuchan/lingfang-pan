@@ -108,6 +108,18 @@ pub(crate) async fn start_installed_plugin(
     {
         return Err("远端插件运行前必须完成在线访问权与发行版校验".to_string());
     }
+    // M-3/P3-2：签名门禁移入 Rust——即使前端伪造 registry_access_granted，
+    // 远端来源插件启动前仍强制 signed && verified（fail-closed）。
+    if matches!(
+        installation.origin,
+        InstallationOrigin::Team | InstallationOrigin::Marketplace
+    ) {
+        crate::plugin_security::enforce_signature_gate(
+            &manager.plugins_root_dir(),
+            &std::path::PathBuf::from(&release.path),
+            true,
+        )?;
+    }
     manager.mark_dependency_status(
         &installation_id,
         &release.release_id,

@@ -59,6 +59,7 @@ export const REVEALABLE_SECRET_KEYS = [
   'tavilyApiKey',
   'braveApiKey',
   'rbflowApiKey',
+  'rbflowBridgeToken',
 ] as const;
 export type RevealableSecretKey = (typeof REVEALABLE_SECRET_KEYS)[number];
 
@@ -76,13 +77,13 @@ export class RevealSecretDto {
 
   @ApiProperty({
     description:
-      '要查看明文的敏感 key（仅 smtpPass / geetestCaptchaKey / giteeAccessToken / tavilyApiKey / braveApiKey / rbflowApiKey）',
+      '要查看明文的敏感 key（仅 smtpPass / geetestCaptchaKey / giteeAccessToken / tavilyApiKey / braveApiKey / rbflowApiKey / rbflowBridgeToken）',
     example: 'smtpPass',
   })
   @IsString()
   @IsIn(REVEALABLE_SECRET_KEYS, {
     message:
-      '仅支持查看 smtpPass、geetestCaptchaKey、giteeAccessToken、tavilyApiKey、braveApiKey 或 rbflowApiKey',
+      '仅支持查看 smtpPass、geetestCaptchaKey、giteeAccessToken、tavilyApiKey、braveApiKey、rbflowApiKey 或 rbflowBridgeToken',
   })
   key!: RevealableSecretKey;
 }

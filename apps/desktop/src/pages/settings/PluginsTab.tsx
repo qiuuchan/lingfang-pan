@@ -16,12 +16,13 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { FolderIcon } from 'lucide-react';
+import { FolderIcon, KeyRoundIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { LoadingButton } from '@/components/loading-button';
 import { getPluginsRoot, openPluginsRoot, setPluginsRoot } from '@/lib/plugin-status';
+import { tauriInvoke } from '@/lib/api';
 
 /** 友好提取错误消息：Tauri 命令 reject 以 Error 形式抛出（message 为 Rust 返回的字符串错误）。 */
 function errorMessage(error: unknown): string {
@@ -44,6 +45,11 @@ export function PluginsTab() {
   const [input, setInput] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // RBFlow 桥接令牌（H-3：set_bridge_token/has_bridge_token，落盘 app_data/bridge_token.txt）。
+  const [configured, setConfigured] = useState(false);
+  const [bridgeInput, setBridgeInput] = useState('');
+  const [bridgeSaving, setBridgeSaving] = useState(false);
+
   // 挂载时拉取当前 plugins_root。失败兜底空串（不阻断页面，用户可重新输入）。
   useEffect(() => {
     void getPluginsRoot()
@@ -54,6 +60,10 @@ export function PluginsTab() {
       .catch(() => {
         setCurrentRoot('');
       });
+    // 拉取桥接令牌是否已配置（仅布尔，不返回明文）。
+    void tauriInvoke<boolean>('has_bridge_token')
+      .then(setConfigured)
+      .catch(() => setConfigured(false));
   }, []);
 
   /** 保存插件存放路径：调 set_plugins_root，Rust 侧校验 + 创建目录 + 持久化。 */
@@ -94,64 +104,148 @@ export function PluginsTab() {
     }
   }
 
+  /** 保存 RBFlow 桥接令牌（Rust 侧落盘；空输入报错拒绝写入）。 */
+  async function saveBridgeToken() {
+    setBridgeSaving(true);
+    try {
+      await tauriInvoke('set_bridge_token', { token: bridgeInput });
+      setBridgeInput('');
+      setConfigured(true);
+      toast.success('RBFlow 桥接令牌已保存');
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBridgeSaving(false);
+    }
+  }
+
+  /** 清除 RBFlow 桥接令牌（传 null 触发 Rust 侧删除文件）。 */
+  async function clearBridgeToken() {
+    setBridgeSaving(true);
+    try {
+      await tauriInvoke('set_bridge_token', { token: null });
+      setBridgeInput('');
+      setConfigured(false);
+      toast.success('已清除 RBFlow 桥接令牌');
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBridgeSaving(false);
+    }
+  }
+
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <FolderIcon className="size-5 text-primary" />
-          <CardTitle>插件存放路径</CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="text-sm text-muted-foreground">
-          当前路径：
-          <span className="font-mono text-foreground">
-            {currentRoot === null ? '读取中…' : currentRoot || '未配置'}
-          </span>
-        </div>
-        <Field>
-          <FieldLabel htmlFor="pluginsRootPath">插件根目录</FieldLabel>
-          <Input
-            id="pluginsRootPath"
-            placeholder="例如 D:\\MyPlugins 或留空使用默认路径"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && savePath()}
-          />
-        </Field>
-        <div className="flex items-center gap-2">
-          <LoadingButton
-            loading={saving}
-            onClick={() => {
-              void savePath();
-            }}
-          >
-            保存路径
-          </LoadingButton>
-          <LoadingButton
-            variant="outline"
-            loading={saving}
-            onClick={() => {
-              void resetDefault();
-            }}
-          >
-            恢复默认
-          </LoadingButton>
-          <LoadingButton
-            variant="outline"
-            loading={false}
-            onClick={() => {
-              void openRoot();
-            }}
-          >
-            打开目录
-          </LoadingButton>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          创建器生成的插件会保存在此目录下，重启软件后仍可用。修改路径后，原目录中的插件不会自动迁移，
-          如需保留请在修改前手动把旧目录内容复制到新路径。
-        </p>
-      </CardContent>
-    </Card>
+    <>
+      <Card className="w-full">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <FolderIcon className="size-5 text-primary" />
+            <CardTitle>插件存放路径</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="text-sm text-muted-foreground">
+            当前路径：
+            <span className="font-mono text-foreground">
+              {currentRoot === null ? '读取中…' : currentRoot || '未配置'}
+            </span>
+          </div>
+          <Field>
+            <FieldLabel htmlFor="pluginsRootPath">插件根目录</FieldLabel>
+            <Input
+              id="pluginsRootPath"
+              placeholder="例如 D:\\MyPlugins 或留空使用默认路径"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && savePath()}
+            />
+          </Field>
+          <div className="flex items-center gap-2">
+            <LoadingButton
+              loading={saving}
+              onClick={() => {
+                void savePath();
+              }}
+            >
+              保存路径
+            </LoadingButton>
+            <LoadingButton
+              variant="outline"
+              loading={saving}
+              onClick={() => {
+                void resetDefault();
+              }}
+            >
+              恢复默认
+            </LoadingButton>
+            <LoadingButton
+              variant="outline"
+              loading={false}
+              onClick={() => {
+                void openRoot();
+              }}
+            >
+              打开目录
+            </LoadingButton>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            创建器生成的插件会保存在此目录下，重启软件后仍可用。修改路径后，原目录中的插件不会自动迁移，
+            如需保留请在修改前手动把旧目录内容复制到新路径。
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card className="w-full">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <KeyRoundIcon className="size-5 text-primary" />
+            <CardTitle>RBFlow 桥接令牌</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="text-sm text-muted-foreground">
+            状态：
+            <span className={configured ? 'font-medium text-emerald-600' : 'font-medium text-muted-foreground'}>
+              {configured ? '已配置' : '未配置'}
+            </span>
+          </div>
+          <Field>
+            <FieldLabel htmlFor="bridgeToken">桥接令牌</FieldLabel>
+            <Input
+              id="bridgeToken"
+              type="password"
+              autoComplete="off"
+              placeholder="填写平台管理员下发的 RBFlow 桥接令牌"
+              value={bridgeInput}
+              onChange={(e) => setBridgeInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && saveBridgeToken()}
+            />
+          </Field>
+          <div className="flex items-center gap-2">
+            <LoadingButton
+              loading={bridgeSaving}
+              onClick={() => {
+                void saveBridgeToken();
+              }}
+            >
+              保存令牌
+            </LoadingButton>
+            <LoadingButton
+              variant="outline"
+              loading={bridgeSaving}
+              onClick={() => {
+                void clearBridgeToken();
+              }}
+            >
+              清除
+            </LoadingButton>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            令牌由平台管理员在后台配置（平台设置 → RBFlow），部署时填到桌面端。桥进程用它与
+            协作平台交换 RBFlow 转发凭证，仅用于插件音视频能力，不等同你的登录凭据。
+          </p>
+        </CardContent>
+      </Card>
+    </>
   );
 }

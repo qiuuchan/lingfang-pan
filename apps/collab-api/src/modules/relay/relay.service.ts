@@ -12,8 +12,10 @@
 //     失败：refund + 日志记 upstream_error / no_channel。
 import { Inject, Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../prisma.service';
 import { AppError } from '../../common';
+import { AuthService } from '../auth.service';
 import { PricingService } from '../pricing.service';
 import { CreditService } from '../credit.service';
 import { ChannelRouterService } from '../channel.service';
@@ -73,6 +75,9 @@ function normalizeDeveloperRole(
  * 与视频「信任插件上报 seconds + 审计」不同：音频秒数由 relay 从 prompt_text 推导，
  * 插件无法篡改计费秒数（防绕过）。
  */
+/** 视频单次计费秒数上限（防插件上报超大 seconds 抬高计费）。管理员可用 PlatformSetting.videoMaxSeconds 调整。 */
+const VIDEO_MAX_SECONDS_DEFAULT = 300;
+
 /** 中文语音合成语速（字/秒）。含标点停顿的保守估计；可调，但须与插件 estimate_voice_seconds 同步。 */
 const VOICE_CHARS_PER_SECOND = 4;
 /** 目标文本上限（字符），与 RBFLow /tasks/voice 的 _MAX_PROMPT_TEXT 对齐。 */
@@ -88,7 +93,8 @@ export class RelayService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PricingService) private readonly pricing: PricingService,
     @Inject(CreditService) private readonly credits: CreditService,
-    @Inject(ChannelRouterService) private readonly router: ChannelRouterService
+    @Inject(ChannelRouterService) private readonly router: ChannelRouterService,
+    @Inject(AuthService) private readonly auth: AuthService
   ) {}
 
   /** GET /api/relay/v1/models —— 返回当前团队实际可用的版本哨兵、资源池与 contextWindow。 */
@@ -301,20 +307,33 @@ export class RelayService {
     });
   }
 
+  /** 读 PlatformSetting.videoMaxSeconds（缺失/非法用默认 300，防超大秒数刷计费）。 */
+  private async readVideoMaxSeconds(): Promise<number> {
+    const row = await this.prisma.platformSetting.findUnique({
+      where: { key: 'videoMaxSeconds' },
+      select: { value: true },
+    });
+    const n = Number.parseInt((row?.value ?? '').trim(), 10);
+    return Number.isFinite(n) && n > 0 ? n : VIDEO_MAX_SECONDS_DEFAULT;
+  }
+
   /**
    * POST /api/relay/v1/videos/generations —— 视频生成按秒计费（精简编排，不接渠道路由/上游转发）。
    *
    * 与 chat/image 的 executeRelay 区别：视频上游是外部 RBFLow（由桌面桥代理转发，不进 relay），
    * relay 只负责灵石账本（reserve→reconcile 两阶段）。PER_SECOND 单价 × 秒数。
    *
-   * seconds 由插件 ffprobe 探测后上报（MVP 信任 + 审计）；relay clamp 到 ≥1 秒防 0 秒白嫖。
+   * seconds 由插件 ffprobe 探测后上报；relay 先 clamp 服务端上限（videoMaxSeconds，默认 300）再向上
+   * 取整，防止插件上报超大秒数抬高计费（也防 0/负值白嫖）。原始上报值记入 requestSummary 供审计。
    * 视频无上游 token usage，故 reserve(cap=实扣额) 后直接 reconcile(实扣额)（净效果=实扣）。
    */
   async videoGenerations(req: Request, body: Record<string, unknown>) {
     const auth = this.requireAuth(req);
     const tier = wireToTier(String(body.model ?? 'fast'));
-    // 秒数：向上取整 + clamp ≥1（防 0/负值白嫖）。
-    const seconds = Math.max(1, Math.ceil(Number(body.seconds) || 0));
+    const reportedSeconds = Number(body.seconds) || 0;
+    const maxSeconds = await this.readVideoMaxSeconds();
+    // 秒数：1..maxSeconds（clamp 服务端上限，防客户端上报超大值刷计价）。
+    const seconds = Math.min(maxSeconds, Math.max(1, Math.ceil(reportedSeconds)));
     const startedAt = Date.now();
     const requestId = (req.header('x-request-id') || undefined) as string | undefined;
     const clientIp = extractClientIp(req);
@@ -347,7 +366,13 @@ export class RelayService {
         model: 'video_generate',
         status: 'reserve',
         requestId,
-        requestSummary: { seconds, tier, model: body.model ?? 'fast' } as never,
+        requestSummary: {
+          seconds,
+          reportedSeconds,
+          maxSeconds,
+          tier,
+          model: body.model ?? 'fast',
+        } as never,
         clientIp,
         clientSource,
         credits: 0,
@@ -728,6 +753,10 @@ export class RelayService {
     if (!log) {
       throw new AppError(404, 'not_found', '扣费记录不存在或不属于当前团队');
     }
+    // 门禁（H-2）：仅允许失败/未交付的调用退款，成功交付的一律拒绝（防"白嫖"重放退款）。
+    if (log.status === 'success') {
+      throw new AppError(409, 'refund_rejected', '该调用已成功交付，不支持退款');
+    }
     const refunded = await this.credits.refundConsumed(
       auth.teamId,
       callLogId,
@@ -884,6 +913,10 @@ export class RelayService {
     if (!log) {
       throw new AppError(404, 'not_found', '扣费记录不存在或不属于当前团队');
     }
+    // 门禁（H-2）：仅允许失败/未交付的调用退款，成功交付的一律拒绝（防"白嫖"重放退款）。
+    if (log.status === 'success') {
+      throw new AppError(409, 'refund_rejected', '该调用已成功交付，不支持退款');
+    }
     const refunded = await this.credits.refundConsumed(
       auth.teamId,
       callLogId,
@@ -906,15 +939,10 @@ export class RelayService {
   }
 
   /**
-   * GET /api/relay/v1/rbflow-config —— 读 RBFLow 服务配置（供桌面桥转发 RBFLow 任务用）。
-   *
-   * 已登录用户（RelayTeamGuard）即可调用——桥转发本身已先扣了灵石，读配置不需要 platform admin。
-   * 返回 { url, api_key } 明文（含 api_key）：桥是 localhost 服务端进程，持有它转发 RBFLow 是安全的；
-   * 插件进程永远拿不到（插件只跟桥的 localhost 通信，桥的 /video/* 路由不回传此配置给插件）。
-   * 未配置 url → 503 rbflow_not_configured（桥据此返回给插件明确错误）。
+   * 读 RBFLow 服务配置（url + api_key）：从 PlatformSetting 构建。
+   * 未配置 url → 503 rbflow_not_configured。
    */
-  async getRbflowConfig(req: Request) {
-    this.requireAuth(req);
+  private async readRbflowConfig(): Promise<{ url: string; apiKey: string }> {
     const rows = await this.prisma.platformSetting.findMany({
       where: { key: { in: ['rbflowUrl', 'rbflowApiKey'] } },
       select: { key: true, value: true },
@@ -929,6 +957,52 @@ export class RelayService {
         'RBFLow 服务未配置（请在后台管理「设置」填写 RBFLow 地址）'
       );
     }
+    return { url, apiKey };
+  }
+
+  /**
+   * GET /api/relay/v1/rbflow-config —— 读 RBFLow 服务配置（桌面桥转发 RBFLow 任务用）。
+   *
+   * H-3 收紧：配置含 api_key（平台级凭据），此前任意已登录用户（RelayTeamGuard）即可读。
+   * 现在要求 platform.rbflow.manage 权限码——普通成员/自定义角色不再持有该码，
+   * 只有平台管理员级角色可读。桌面桥普通用户的凭证走 bridgeRbflowConfig（X-Bridge-Token 通道）。
+   */
+  async getRbflowConfig(req: Request) {
+    const auth = this.requireAuth(req);
+    await this.auth.ensurePermission(auth.userId, 'platform.rbflow.manage');
+    const { url, apiKey } = await this.readRbflowConfig();
+    return { url, api_key: apiKey };
+  }
+
+  /**
+   * POST /api/relay/v1/bridge/rbflow-credential —— 桌面桥接用的独立凭证通道。
+   *
+   * H-3 修复配套：rbflow-config 收紧到平台管理员后，普通成员桌面的视频/音频桥接需要
+   * 仍能拿到 RBFLow 转发凭证。桌面桥（本地 localhost 进程）改用 X-Bridge-Token 头携带
+   * 平台签发的「桥接令牌」（PlatformSetting.rbflowBridgeToken，仅管理员可配置），
+   * 该令牌只发给 POS 桌面安装的桥进程，浏览器/插件进程拿不到。常量时间比较防时序旁路。
+   */
+  async bridgeRbflowConfig(req: Request) {
+    const auth = this.requireAuth(req);
+    const token = String(req.header('x-bridge-token') ?? '');
+    if (!token) {
+      throw new AppError(400, 'bad_request', '缺少 X-Bridge-Token 请求头');
+    }
+    const row = await this.prisma.platformSetting.findUnique({
+      where: { key: 'rbflowBridgeToken' },
+      select: { value: true },
+    });
+    const expected = (row?.value ?? '').trim();
+    if (!expected || token.length !== expected.length) {
+      throw new AppError(403, 'bridge_token_invalid', '桥接令牌无效');
+    }
+    const a = Buffer.from(token);
+    const b = Buffer.from(expected);
+    if (!timingSafeEqual(a, b)) {
+      throw new AppError(403, 'bridge_token_invalid', '桥接令牌无效');
+    }
+    void auth;
+    const { url, apiKey } = await this.readRbflowConfig();
     return { url, api_key: apiKey };
   }
 
@@ -1073,7 +1147,18 @@ export class RelayService {
             outputTokens: fr.outputTokens,
             images: fr.images,
           };
-          const realCredits = this.pricing.computeCredits(price.unit, price.pricePerUnit, usage);
+          // 计费漏洞检测（usage_missing）：聊天调用成功但上游未返回任何 token usage（input/output 双 0）。
+          // 多见于上游网关不支持 stream_options.include_usage（部分国产/自建网关会忽略该参数），
+          // 导致 parseOpenAiUsage/parseAnthropicUsage 解析不到 → computeCredits 算出 0 → 用户实际消耗了上游 token 却未计费。
+          // P3-1 兜底：PER_TOKEN_* 渠道在成功调用但 usage 全 0 时按一次调用（pricePerUnit 固定单价）兜底计费，
+          // 消除「实耗上游 token 却 0 计费」的白嫖面；usage_missing 仍保留在日志 errorCode 供对账筛渠道。
+          const usageMissing =
+            kind === 'CHAT' && usage.inputTokens === 0 && usage.outputTokens === 0;
+          const realCredits =
+            usageMissing &&
+            (price.unit === 'PER_TOKEN_INPUT' || price.unit === 'PER_TOKEN_OUTPUT')
+              ? price.pricePerUnit
+              : this.pricing.computeCredits(price.unit, price.pricePerUnit, usage);
           const charged = await this.credits.reconcile(
             auth.teamId,
             cap,
@@ -1082,15 +1167,9 @@ export class RelayService {
             auth.userId
           );
           finalized = true; // 成功路径手动置位（ensureFinalized 跳过，保留 usage/credits）
-          // 计费漏洞检测（usage_missing）：聊天调用成功但上游未返回任何 token usage（input/output 双 0）。
-          // 多见于上游网关不支持 stream_options.include_usage（部分国产/自建网关会忽略该参数），
-          // 导致 parseOpenAiUsage/parseAnthropicUsage 解析不到 → computeCredits 算出 0 → 用户实际消耗了上游 token 却未计费。
-          // 此处不改变成功语义（响应照常下发），仅在日志 errorCode 补标 usage_missing + 打 warn，便于后台对账筛出漏费渠道。
-          const usageMissing =
-            kind === 'CHAT' && usage.inputTokens === 0 && usage.outputTokens === 0;
           if (usageMissing) {
             console.warn(
-              `[relay] usage_missing: 上游未返回 token usage，本次可能漏计费 (callLogId=${pendingLog.id}, model=${cand.model}, charged=${charged})`
+              `[relay] usage_missing: 上游未返回 token usage，本次按一次调用兜底计费 (callLogId=${pendingLog.id}, model=${cand.model}, charged=${charged})`
             );
           }
           // R3-2：钱已扣（reconcile 完成），finalizeLog 失败不得影响已成功的响应，

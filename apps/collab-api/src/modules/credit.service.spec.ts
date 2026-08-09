@@ -17,6 +17,7 @@ function mockTx() {
       upsert: vi.fn(async () => ({ balance: 1000 })),
       findUnique: vi.fn(async () => ({ balance: 500 })),
     },
+    $queryRaw: vi.fn(async () => [{ balance: 500 }]), // 行锁直读（tagged template 调用）
     creditLedger: {
       create: vi.fn(),
       findFirst: vi.fn(async () => null),
@@ -92,7 +93,7 @@ describe('CreditService reserve/reconcile/refund', () => {
   });
 
   it('reconcile: cap=0 返回真实扣款额而不是实际用量', async () => {
-    tx.teamCredit.findUnique.mockResolvedValueOnce({ balance: 120 });
+    tx.$queryRaw.mockResolvedValueOnce([{ balance: 120 }]);
     const charged = await svc.reconcile('t1', 0, 200, 'log1', 'u1');
     expect(charged).toBe(120);
     expect(tx.teamCredit.update).toHaveBeenCalledWith(
@@ -150,7 +151,7 @@ describe('CreditService reserve/reconcile/refund', () => {
     );
     expect(consumeCreate).toBeUndefined();
 
-    tx.teamCredit.findUnique.mockResolvedValueOnce({ balance: 500 });
+    tx.$queryRaw.mockResolvedValueOnce([{ balance: 500 }]);
     const chargedRounded = await svc.reconcile('t1', 0, 1.235, 'log2', 'u1');
     expect(chargedRounded).toBe(1.24);
     expect(tx.teamCredit.update).toHaveBeenCalledWith(

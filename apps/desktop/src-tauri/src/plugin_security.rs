@@ -13,7 +13,7 @@
 //! 与运行（避免破坏 AI 生成插件的工作流：它们默认无签名）。
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use minisign_verify::{PublicKey, Signature};
 use serde::Serialize;
@@ -38,8 +38,19 @@ pub fn verify_plugin_signature(
     plugin_id: &str,
 ) -> Result<PluginSignatureStatus, String> {
     let dir = store.plugin_dir(plugin_id)?;
-    let sig_path = dir.join("manifest.sig");
-    let manifest_path = dir.join("manifest.json");
+    verify_plugin_signature_at_dir(&store.plugins_root(), &dir)
+}
+
+/// 目录级验签（install/start 强制门禁共用）：
+/// - 无签名文件 → signed=false、verified=false（reason 说明缺失）；
+/// - 有签名但未配置公钥 → signed=true、verified=false（fail-closed，reason 说明）；
+/// - 验签失败 → verified=false。
+pub fn verify_plugin_signature_at_dir(
+    plugins_root: &Path,
+    plugin_dir: &Path,
+) -> Result<PluginSignatureStatus, String> {
+    let sig_path = plugin_dir.join("manifest.sig");
+    let manifest_path = plugin_dir.join("manifest.json");
 
     if !sig_path.exists() {
         return Ok(PluginSignatureStatus {
@@ -57,14 +68,14 @@ pub fn verify_plugin_signature(
     }
 
     // 公钥来源：plugins_root/.plugin-pubkey（优先）或 env LINGFANG_PLUGIN_PUBKEY。
-    // 未配置时返回 signed=true 但 verified=false（不阻断，提示「平台未配置验签公钥」）。
-    let pubkey_str = match read_pubkey(store)? {
+    // 未配置时返回 signed=true 但 verified=false（fail-closed：强制门禁会拒绝远端来源）。
+    let pubkey_str = match read_pubkey(plugins_root)? {
         Some(k) => k,
         None => {
             return Ok(PluginSignatureStatus {
                 signed: true,
                 verified: false,
-                reason: "平台未配置插件验签公钥（.plugin-pubkey / LINGFANG_PLUGIN_PUBKEY）".into(),
+                reason: "平台未配置插件验签公钥（.plugin-pubkey / LINGFANG_PLUGIN_PUBKEY），fail-closed 拒绝".into(),
             });
         }
     };
@@ -88,9 +99,45 @@ pub fn verify_plugin_signature(
     }
 }
 
+/// 强制签名门禁（M-3/P1-2 修复）：install/start 移入 Rust 侧的签名检查，fail-closed。
+///
+/// 规则：
+/// - 草稿插件（manifest.draft===true，AI 本地生成）豁免；
+/// - require_signed=false（Local/Builtin 安装）：不拦无签名，仅状态展示；
+/// - require_signed=true（Team/Marketplace 远端链路）：必须 signed && verified，
+///   无签名 / 未配置公钥 / 验签失败一律拒绝安装或启动。
+pub fn enforce_signature_gate(
+    plugins_root: &Path,
+    plugin_dir: &Path,
+    require_signed: bool,
+) -> Result<(), String> {
+    let manifest_path = plugin_dir.join("manifest.json");
+    let manifest: serde_json::Value = fs::read(&manifest_path)
+        .map_err(|_| "插件 manifest.json 缺失，拒绝安装/启动".to_string())
+        .and_then(|bytes| {
+            serde_json::from_slice(&bytes)
+                .map_err(|_| "插件 manifest.json 解析失败，拒绝安装/启动".to_string())
+        })?;
+    if manifest
+        .get("draft")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let status = verify_plugin_signature_at_dir(plugins_root, plugin_dir)?;
+    if require_signed && !status.verified {
+        return Err(format!(
+            "插件签名校验未通过，拒绝安装/启动：{}（fail-closed）",
+            status.reason
+        ));
+    }
+    Ok(())
+}
+
 /// 公钥读取：plugins_root/.plugin-pubkey（单行 base64）> env LINGFANG_PLUGIN_PUBKEY > None。
-fn read_pubkey(store: &PluginStore) -> Result<Option<String>, String> {
-    let path: PathBuf = store.plugins_root().join(".plugin-pubkey");
+fn read_pubkey(plugins_root: &Path) -> Result<Option<String>, String> {
+    let path: PathBuf = plugins_root.join(".plugin-pubkey");
     if path.exists() {
         let raw = fs::read_to_string(&path).map_err(|e| format!("读取公钥文件失败：{e}"))?;
         let trimmed = raw.trim();
@@ -212,6 +259,34 @@ mod tests {
         assert!(!status.signed);
         assert!(!status.verified);
         assert!(status.reason.contains("签名"));
+    }
+
+    #[test]
+    fn enforce_gate_rejects_unsigned_non_draft_remote_plugin() {
+        let store = temp_store("gate-unsigned");
+        let dir = store.plugin_dir("remote-pkg").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), r#"{"id":"remote-pkg"}"#).unwrap();
+        let error = enforce_signature_gate(&store.plugins_root(), &dir, true).unwrap_err();
+        assert!(error.contains("manifest.sig"));
+    }
+
+    #[test]
+    fn enforce_gate_allows_draft_plugin_without_signature() {
+        let store = temp_store("gate-draft");
+        let dir = store.plugin_dir("draft-pkg").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), r#"{"id":"draft-pkg","draft":true}"#).unwrap();
+        enforce_signature_gate(&store.plugins_root(), &dir, true).unwrap();
+    }
+
+    #[test]
+    fn enforce_gate_allows_local_install_without_signature() {
+        let store = temp_store("gate-local");
+        let dir = store.plugin_dir("local-pkg").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), r#"{"id":"local-pkg"}"#).unwrap();
+        enforce_signature_gate(&store.plugins_root(), &dir, false).unwrap();
     }
 
     #[test]

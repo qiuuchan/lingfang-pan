@@ -3,6 +3,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { RoleService } from './role.service';
 import { SYSTEM_PLATFORM_ADMIN_ROLE_ID as PLATFORM_ADMIN_ROLE_ID } from './permissions/permission-codes';
+import { PERMISSION_CODE_SET } from './permissions/permission-codes';
 import { badRequest, conflict, forbidden, notFound } from '../common';
 
 function mockPrisma() {
@@ -37,8 +38,10 @@ function mockPrisma() {
 
 function mockAuth() {
   return {
-    ensurePermission: vi.fn(async () => ({ perms: new Set() })),
-    ensureAnyPermission: vi.fn(async () => ({ perms: new Set() })),
+    // 默认持有全部注册权限码（模拟内置管理员角色）→ 超集校验默认放行；
+    // 单测「权限不足」时按需 mock 返回受限 perms。
+    ensurePermission: vi.fn(async () => ({ perms: new Set(PERMISSION_CODE_SET) })),
+    ensureAnyPermission: vi.fn(async () => ({ perms: new Set(PERMISSION_CODE_SET) })),
   };
 }
 
@@ -71,6 +74,7 @@ describe('RoleService 团队角色 + 平台角色', () => {
       teamId: 'team-1',
       userId: 'admin-1',
       teamRoleId: 'team-admin-team-1',
+      role: 'TEAM_ADMIN', // 双写字段（H-4：系统团队管理员角色分配权判定）
       team: { status: 'ACTIVE' },
     }));
     // @ts-expect-error mock 不实现完整 PrismaService 接口
@@ -313,12 +317,77 @@ describe('RoleService 团队角色 + 平台角色', () => {
         })
       );
     });
+
+    it('H-4 门禁：非团队管理员分配系统团队管理员角色 → 403', async () => {
+      prisma.role.findUnique.mockResolvedValue(
+        makeRole({
+          id: 'team-admin-team-1',
+          name: '系统团队管理员',
+          code: 'team_admin',
+          isSystem: true,
+        })
+      );
+      prisma.teamMembership.findFirst.mockResolvedValueOnce({
+        teamId: 'team-1',
+        userId: 'member-1',
+        teamRoleId: 'team-member-team-1',
+        role: 'MEMBER',
+        team: { status: 'ACTIVE' },
+      });
+      prisma.teamMembership.findUnique.mockResolvedValue({
+        teamId: 'team-1',
+        userId: 'u2',
+        status: 'ACTIVE',
+      });
+      await expect(
+        service.assignMemberRole('member-1', 'u2', 'team-admin-team-1')
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('H-4 门禁：分配权限高于自身权限的自定义角色 → 403（缺少权限清单）', async () => {
+      prisma.role.findUnique.mockResolvedValue(
+        makeRole({ id: 'role-strong', permissions: ['team.member.role.assign'] })
+      );
+      prisma.teamMembership.findFirst.mockResolvedValueOnce({
+        teamId: 'team-1',
+        userId: 'member-1',
+        teamRoleId: 'team-member-team-1',
+        role: 'MEMBER',
+        team: { status: 'ACTIVE' },
+      });
+      prisma.teamMembership.findUnique.mockResolvedValue({
+        teamId: 'team-1',
+        userId: 'u2',
+        status: 'ACTIVE',
+      });
+      // 分配者权限为 team.dashboard.view（mockImplementation：两次 ensurePermission 都受限）
+      auth.ensurePermission.mockImplementation(async () => ({
+        perms: new Set(['team.dashboard.view']),
+      }));
+      await expect(
+        service.assignMemberRole('member-1', 'u2', 'role-strong')
+      ).rejects.toMatchObject({ status: 403 });
+    });
   });
 
   describe('平台角色', () => {
     it('assignPlatformRole 系统平台管理员角色双写 platformRole=PLATFORM_ADMIN + 吊销 tokenVersion', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'u2' });
-      prisma.role.findUnique.mockResolvedValue({ id: PLATFORM_ADMIN_ROLE_ID, scope: 'PLATFORM' });
+      // H-4：actor（admin-1）须是平台管理员本人才能分配系统平台管理员角色
+      prisma.user.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
+        where.id === 'admin-1'
+          ? {
+              id: 'admin-1',
+              platformRole: 'PLATFORM_ADMIN',
+              platformRoleId: PLATFORM_ADMIN_ROLE_ID,
+            }
+          : { id: 'u2' }
+      );
+      prisma.role.findUnique.mockResolvedValue({
+        id: PLATFORM_ADMIN_ROLE_ID,
+        scope: 'PLATFORM',
+        isSystem: true,
+        permissions: [],
+      });
       prisma.user.update.mockResolvedValue({});
       await service.assignPlatformRole('admin-1', 'u2', PLATFORM_ADMIN_ROLE_ID);
       // 第二次 update 写 platformRole + tokenVersion increment

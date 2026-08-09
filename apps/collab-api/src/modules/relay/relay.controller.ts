@@ -92,9 +92,17 @@ export class RelayController {
 
   @Get('rbflow-config')
   @ApiOperation({
-    summary: '读取 RBFLow 服务配置（供桌面桥转发用，已登录用户即可；插件进程不可见）',
+    summary: '读取 RBFLow 服务配置（平台管理员，供诊断；桌面桥用 bridge/rbflow-credential）',
   })
   rbflowConfig(@Req() req: Request) {
     return this.relay.getRbflowConfig(req);
+  }
+
+  @Post('bridge/rbflow-credential')
+  @ApiOperation({
+    summary: '桌面桥专用 RBFLow 凭证通道（X-Bridge-Token 校验，普通用户桥接可用）',
+  })
+  bridgeRbflowConfig(@Req() req: Request) {
+    return this.relay.bridgeRbflowConfig(req);
   }
 }
