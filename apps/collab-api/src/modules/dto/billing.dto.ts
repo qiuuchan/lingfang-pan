@@ -71,7 +71,7 @@ export class ChannelUpsertDto {
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
 }
 
-// === 定价（单位：PER_TOKEN_* = 每 1M token；PER_CALL 每次；PER_IMAGE 每张）===
+// === 定价（整数分；1 灵石=100 分。PER_TOKEN_* = 每 1M token；PER_CALL 每次；PER_IMAGE 每张；PER_SECOND 每秒）===
 
 export class PricingUpsertDto {
   @ApiProperty({ enum: PRICING_CAPABILITY }) @IsEnum(PRICING_CAPABILITY) capability!:
@@ -79,9 +79,9 @@ export class PricingUpsertDto {
   @ApiProperty() @IsString() @IsNotEmpty() model!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() label?: string;
   @ApiProperty({ enum: PRICING_UNIT }) @IsEnum(PRICING_UNIT) unit!: string;
-  @ApiProperty({ description: '单价（灵石）；PER_TOKEN_* 时为每 1M token 灵石数，支持小数' })
+  @ApiProperty({ description: '单价（整数分；1 灵石=100 分）。PER_TOKEN_* 时为每 1M token 灵石分；PER_CALL/PER_IMAGE/PER_SECOND 为每次/每张/每秒固定灵石分' })
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(0)
   pricePerUnit!: number;
   @ApiPropertyOptional({ description: '该模型最大上下文窗口（token）' })

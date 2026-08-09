@@ -14,12 +14,13 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { badRequest, insufficientBalance } from '../common';
 
-const DEFAULT_SIGNUP_BONUS = 1000;
+const DEFAULT_SIGNUP_BONUS = 100000; // 注册赠送灵石（整数分；1 灵石=100 分 → 1000 灵石）
 
+// 灵石以整数分（1 灵石=100 分）存储与计算；本函数仅做整数兜底（消除浮点噪声 / -0）。
 function roundCredits(value: number | null | undefined): number {
   const n = value ?? 0;
   if (!Number.isFinite(n)) return 0;
-  const rounded = Math.round(n * 100) / 100;
+  const rounded = Math.round(n);
   return Object.is(rounded, -0) ? 0 : rounded;
 }
 
@@ -27,7 +28,7 @@ function roundCredits(value: number | null | undefined): number {
 export class CreditService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  /** 读 PlatformSetting.creditSignupBonus（缺失用默认 1000）。 */
+  /** 读 PlatformSetting.creditSignupBonus（缺失去默认 100000 分 = 1000 灵石）。存储单位为整数分。 */
   private async readSignupBonus(): Promise<number> {
     const row = await this.prisma.platformSetting.findUnique({
       where: { key: 'creditSignupBonus' },

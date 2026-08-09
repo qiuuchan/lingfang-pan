@@ -123,11 +123,11 @@ export const ChannelSchema = z.object({
 
 export const ModelPricingSchema = z.object({
   id: z.string(),
-  capability: z.enum(['chat', 'image', 'action']),
+  capability: z.enum(['chat', 'image', 'action', 'video', 'audio']),
   model: z.string(),
   label: z.string(),
-  unit: z.enum(['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL', 'PER_IMAGE']),
-  pricePerUnit: z.number().int(),
+  unit: z.enum(['PER_TOKEN_INPUT', 'PER_TOKEN_OUTPUT', 'PER_CALL', 'PER_IMAGE', 'PER_SECOND']),
+  pricePerUnit: z.number().int(), // 灵石单价（整数分；1 灵石=100 分）
   tier: TierSchema.nullable(),
   enabled: z.boolean(),
   createdAt: z.string(),
@@ -157,7 +157,7 @@ export const LlmCallLogSchema = z.object({
   outputTokens: z.number().int(),
   images: z.number().int(),
   durationMs: z.number().int(),
-  credits: z.number().int(),
+  credits: z.number().int(), // 本次实扣灵石（整数分；1 灵石=100 分）
   status: z.string(),
   httpStatus: z.number().int().nullable(),
   errorCode: z.string().nullable(),

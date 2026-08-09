@@ -65,12 +65,13 @@ export class PricingService {
   }
 
   /**
-   * 把用量 + 单价换算成灵石。
-   *  - PER_TOKEN_*：pricePerUnit = 每 1M token 的灵石数。actual = tokens × pricePerUnit / 1_000_000（浮点，保留精度）。
-   *  - PER_CALL：固定 pricePerUnit。
-   *  - PER_IMAGE：pricePerUnit × 张数。
-   *  - PER_SECOND：pricePerUnit × 秒数（视频生成按时长计费）。秒数向上取整，至少 1 秒（防 0 秒白嫖）。
-   * 灵石为 Float（支持小数单价），不再 ceil 强制整数——按真实用量精确计费。
+   * 把用量 + 单价换算成灵石（整数分；1 灵石=100 分）。
+   *  - PER_TOKEN_*：pricePerUnit = 每 1M token 的灵石分。actual = round(tokens × pricePerUnit / 1_000_000)。
+   *    用四舍五入取整到分（消除 (tokens×pricePerUnit)/1e6 的浮点尾数）。
+   *  - PER_CALL：固定 pricePerUnit（分）。
+   *  - PER_IMAGE：pricePerUnit × 张数（分）。
+   *  - PER_SECOND：pricePerUnit × 秒数（视频生成按时长计费，分）。秒数向上取整，至少 1 秒（防 0 秒白嫖）。
+   * 全程整数分运算，不再出现浮点灵石。
    */
   computeCredits(
     unit: string,
@@ -81,12 +82,12 @@ export class PricingService {
       case 'PER_TOKEN_INPUT': {
         const tokens = usage.inputTokens ?? 0;
         if (tokens <= 0) return 0;
-        return (tokens * pricePerUnit) / 1_000_000;
+        return Math.round((tokens * pricePerUnit) / 1_000_000);
       }
       case 'PER_TOKEN_OUTPUT': {
         const tokens = usage.outputTokens ?? 0;
         if (tokens <= 0) return 0;
-        return (tokens * pricePerUnit) / 1_000_000;
+        return Math.round((tokens * pricePerUnit) / 1_000_000);
       }
       case 'PER_CALL':
         return pricePerUnit;
