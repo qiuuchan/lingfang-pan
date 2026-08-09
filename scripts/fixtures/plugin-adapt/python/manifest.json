@@ -1,0 +1,6 @@
+{
+  "name": "lingfang-smoke-python",
+  "description": "灵坊插件适配流水线冒烟样例：python 运行时。故意缺 id / version / visibility / capabilities，交给 A1、A3 自动补齐。",
+  "runtime_type": "python",
+  "entry": "main.py"
+}

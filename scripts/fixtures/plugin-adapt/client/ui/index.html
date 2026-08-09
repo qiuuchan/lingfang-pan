@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>灵坊适配冒烟 · client</title>
+  </head>
+  <body>
+    <main>
+      <h1>灵坊插件适配冒烟样例</h1>
+      <p id="status">等待宿主桥就绪…</p>
+      <button id="ask" type="button">问一句</button>
+    </main>
+    <script>
+      // 宿主桥握手占位：CI 无显示器，运行时确证只做 HTML 有效性 + __lingfangInvoke 存在性检查。
+      const invoke = (channel, payload) =>
+        typeof window.__lingfangInvoke === 'function'
+          ? window.__lingfangInvoke(channel, payload)
+          : Promise.reject(new Error('宿主桥未注入'));
+
+      async function ask() {
+        // llm.chat 走宿主桥，不直连任何第三方端点。
+        const reply = await invoke('llm.chat', {
+          messages: [{ role: 'user', content: '你好，灵坊' }],
+        });
+        // 本地留痕 —— 用于触发 storage.kv 能力探测。
+        localStorage.setItem('lingfang-smoke-last-reply', JSON.stringify(reply));
+        document.getElementById('status').textContent = '已收到回复';
+      }
+
+      async function ping() {
+        // 普通网络请求 —— 用于触发 net.fetch 能力探测。
+        const response = await fetch('https://example.com/health');
+        return response.ok;
+      }
+
+      document.getElementById('ask').addEventListener('click', () => {
+        ask().catch((error) => {
+          document.getElementById('status').textContent = String(error.message);
+        });
+      });
+
+      window.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('status').textContent =
+          typeof window.__lingfangInvoke === 'function' ? '宿主桥已就绪' : '宿主桥未注入（预览模式）';
+        void ping;
+      });
+    </script>
+  </body>
+</html>

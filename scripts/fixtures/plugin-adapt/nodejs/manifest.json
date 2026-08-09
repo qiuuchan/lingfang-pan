@@ -1,0 +1,6 @@
+{
+  "name": "烟雾测试 Node 插件",
+  "runtime_type": "nodejs",
+  "entry": "index.js",
+  "description": "e2e 冒烟样例：触发 A1 缺 id/version/visibility、A3 能力探测(net.fetch)、A4 AI 边界"
+}

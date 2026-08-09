@@ -1,0 +1,4 @@
+{
+  "name": "lingfang-smoke-client",
+  "description": "灵坊插件适配流水线冒烟样例：client 运行时。manifest 只有 name/description，runtime_type、entry、version、visibility、capabilities 全部交给 A1、A3 补齐。"
+}
