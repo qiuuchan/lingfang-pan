@@ -527,6 +527,7 @@ model User {
   desktopExecutorSessions DesktopExecutorSession[]
   automationSchedules     AutomationSchedule[]
   webPreviewSessions      WebPreviewSession[]
+  pluginAdaptationReports PluginAdaptationReport[]
   notifications          Notification[]
   // 计费/中转反向关系：用户作为灵石流水触发者、调用日志发起者。
   creditLedgerActor      CreditLedger[]         @relation("CreditLedgerActor")
@@ -573,6 +574,7 @@ model Team {
   cloudActionDeployments CloudActionDeployment[]
   automationSchedules AutomationSchedule[]
   webPreviewSessions WebPreviewSession[]
+  pluginAdaptationReports PluginAdaptationReport[]
   cloudUsageEvents CloudUsageEvent[]
   sharedNamespaces PluginSharedNamespace[]
   sharedStateOutbox SharedStateOutbox[]
@@ -716,8 +718,8 @@ model PluginRelease {
   aiPolicyVersion    Int                     @default(0)
   aiPolicyStatus     String                  @default("UNCHECKED")
   aiPolicyReason     String                  @default("")
-  adaptationStatus   String                  @map("adaptation_status") @default("NOT_RUN")
-  runEvidence        String?                 @map("run_evidence")
+  adaptationStatus   String                  @default("NOT_RUN")
+  runEvidence        String?                 @db.Text
   createdAt          DateTime                @default(now())
   package            PluginPackage           @relation("PluginPackageReleases", fields: [packageId], references: [id], onDelete: Restrict)
   creator            User?                   @relation("PluginReleaseCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -959,6 +961,26 @@ model WebPreviewSession {
 
   @@index([userId, teamId, expiresAt])
   @@index([releaseId, expiresAt])
+}
+
+// 适配报告暂存位。HTTP 头是 ASCII-only 且有长度上限，装不下含中文、可达数百 KiB 的
+// AdaptationReport，所以客户端先把报告 POST 到暂存端点换一个纯 ASCII 的 reportId，
+// 发布时只在 x-adaptation-report-id 里带这个 id。
+// 一次性兑付（consumedAt）+ TTL（expiresAt），由 PluginArtifactCleanupService 定期清理。
+model PluginAdaptationReport {
+  id String @id @default(uuid())
+  userId String
+  teamId String
+  status String
+  report String @db.Text
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([userId, teamId, expiresAt])
+  @@index([expiresAt])
 }
 
 model PluginEntitlement {

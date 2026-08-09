@@ -15,14 +15,42 @@ export const PluginAiPolicyStatus = z.enum(['UNCHECKED', 'PASSED', 'FAILED']);
 export type PluginAiPolicyStatus = z.infer<typeof PluginAiPolicyStatus>;
 
 /** 灵坊适配检验改造流水线产出的最终状态（随发布请求上送，服务端信任存储）。 */
-export const AdaptationStatus = z.enum(['NOT_RUN', 'ADAPTED_PASSED', 'ADAPTED_FAILED', 'NEEDS_HUMAN']);
+export const AdaptationStatus = z.enum([
+  'NOT_RUN',
+  'ADAPTED_PASSED',
+  'ADAPTED_FAILED',
+  'NEEDS_HUMAN',
+]);
 export type AdaptationStatus = z.infer<typeof AdaptationStatus>;
+/**
+ * 适配报告原文体积上限。报告含逐文件 issue 与运行时 stdout/stderr 摘录，
+ * 32 KiB 装不下，但也不能无界——512 KiB 是暂存端点与读侧共用的硬闸。
+ */
+export const PLUGIN_ADAPTATION_REPORT_MAX_BYTES = 512 * 1024;
+
 /** 适配报告原文（AdaptationReport JSON），仅在详情/审核面暴露。 */
 export const RunEvidence = z
   .string()
-  .max(32 * 1024)
+  .max(PLUGIN_ADAPTATION_REPORT_MAX_BYTES)
   .nullable()
   .default(null);
+
+/**
+ * 适配报告暂存请求。HTTP 头是 ASCII-only 且长度受限（网关普遍 8~32 KiB），
+ * 装不下含中文的完整报告，因此改为「先暂存换 id、发布时只带 id」。
+ */
+export const StageAdaptationReportRequest = z.object({
+  report: z.record(z.unknown()),
+});
+export type StageAdaptationReportRequest = z.infer<typeof StageAdaptationReportRequest>;
+
+export const StageAdaptationReportResponse = z.object({
+  reportId: z.string().uuid(),
+  /** 服务端按白名单归一后的状态，客户端伪造只会退化成 NOT_RUN。 */
+  status: AdaptationStatus,
+  expiresAt: z.string(),
+});
+export type StageAdaptationReportResponse = z.infer<typeof StageAdaptationReportResponse>;
 export const MarketplaceListingStatus = z.enum(['DRAFT', 'ACTIVE', 'DELISTED']);
 export const PluginReleaseSourceKind = z.enum([
   'LINGFANG_CREATOR',

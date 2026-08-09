@@ -1,4 +1,5 @@
 import { TextDecoder } from 'node:util';
+import { PLUGIN_ADAPTATION_REPORT_MAX_BYTES } from '@lingfang/contract';
 import { badRequest } from '../common';
 import { compareStrictSemVer } from './plugin-semver';
 
@@ -21,8 +22,11 @@ export type ReleaseSourceHeaders = {
   sourceKind?: string;
   sourceLabelBase64?: string;
   ingestChannel?: string;
-  /** 客户端适配检验改造流水线产出的 AdaptationReport（原始 JSON 字符串）。 */
-  adaptationReport?: string;
+  /**
+   * 适配报告暂存位 id（纯 ASCII uuid）。报告本身走 POST /plugin-registry/adaptation-reports
+   * 暂存——HTTP 头是 ASCII-only 且长度受限，装不下含中文、可达数百 KiB 的 AdaptationReport。
+   */
+  adaptationReportId?: string;
 };
 
 export const ADAPTATION_STATUSES = [
@@ -76,10 +80,21 @@ function decodeSourceLabel(raw: string | undefined): string {
   return label;
 }
 
+/**
+ * 兑付暂存位后拿到的适配报告。发布路径先在 service 里按 id + 归属做一次性兑付，
+ * 再把结果交给这个纯函数派生通道——模型层保持无 IO，便于单测。
+ */
+export const NO_ADAPTATION: RedeemedAdaptation = { report: null, status: 'NOT_RUN' };
+
+export type RedeemedAdaptation = {
+  report: string | null;
+  status: AdaptationStatus;
+};
+
 export function normalizeReleaseSource(
-  headers: ReleaseSourceHeaders = {}
+  headers: ReleaseSourceHeaders = {},
+  adaptation: RedeemedAdaptation = NO_ADAPTATION
 ): NormalizedReleaseSource {
-  const adaptation = parseAdaptationReport(headers.adaptationReport);
   const declaredChannel = enumValue(
     headers.ingestChannel,
     PLUGIN_INGEST_CHANNELS,
@@ -89,8 +104,8 @@ export function normalizeReleaseSource(
   return {
     sourceKind: enumValue(headers.sourceKind, RELEASE_SOURCE_KINDS, 'UNKNOWN', '插件来源类型'),
     sourceLabel: decodeSourceLabel(headers.sourceLabelBase64),
-    // 携带了「跑过」的适配报告即视为走适配流水线上传，覆盖调用方声明的通道。
-    // status 已过白名单，所以伪造报告最多退化成 NOT_RUN，拿不到 ADAPT 标记。
+    // 兑付到「跑过」的适配报告即视为走适配流水线上传，覆盖调用方声明的通道。
+    // status 在暂存时已过白名单，所以伪造报告最多退化成 NOT_RUN，拿不到 ADAPT 标记。
     ingestChannel: adaptation.status === 'NOT_RUN' ? declaredChannel : 'ADAPT',
     adaptationReport: adaptation.report,
     adaptationStatus: adaptation.status,
@@ -115,33 +130,31 @@ export const PLUGIN_DRY_RUN_MAX_FILES = 2000;
 export const PLUGIN_DRY_RUN_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 
 /**
- * 仅接受可解析且体积合理的 JSON 报告，避免注入不可信负载。
- * 报告完全由客户端提供，服务端不执行插件，只做「留证 + 复核」，
+ * 归一化暂存进来的适配报告。报告完全由客户端提供，服务端不执行插件，只做「留证 + 复核」，
  * 因此 status 必须落在白名单内，否则一律降级为 NOT_RUN——
  * 绝不能让客户端自定义字符串直接落库成为审核依据。
+ * 体积超限直接拒（而不是静默丢弃），否则开发者会以为报告已留证。
  */
-function parseAdaptationReport(raw: string | undefined): {
-  report: string | null;
+export function normalizeAdaptationReport(report: unknown): {
+  report: string;
   status: AdaptationStatus;
 } {
-  if (!raw || raw.length > 32 * 1024) return { report: null, status: 'NOT_RUN' };
-  const parsed = safeJsonParse(raw);
-  if (!parsed) return { report: null, status: 'NOT_RUN' };
-  const claimed = parsed.status;
-  const status =
-    typeof claimed === 'string' && (ADAPTATION_STATUSES as readonly string[]).includes(claimed)
-      ? (claimed as AdaptationStatus)
-      : 'NOT_RUN';
-  return { report: raw, status };
-}
-
-function safeJsonParse(raw: string): Record<string, unknown> | null {
-  try {
-    const v = JSON.parse(raw);
-    return v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
-  } catch {
-    return null;
+  if (!report || typeof report !== 'object' || Array.isArray(report)) {
+    throw badRequest('适配报告必须是 JSON 对象');
   }
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(report);
+  } catch {
+    throw badRequest('适配报告无法序列化');
+  }
+  if (Buffer.byteLength(serialized, 'utf8') > PLUGIN_ADAPTATION_REPORT_MAX_BYTES) {
+    throw badRequest('适配报告超过 512 KiB，请裁剪运行时日志后重试');
+  }
+  return {
+    report: serialized,
+    status: normalizeStoredAdaptationStatus((report as Record<string, unknown>).status as string),
+  };
 }
 
 type ReleaseJsonInput = {

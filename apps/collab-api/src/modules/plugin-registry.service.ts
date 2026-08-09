@@ -60,11 +60,15 @@ import {
   assertDryRunPayloadSize,
   highestSemVer,
   listingJson,
+  NO_ADAPTATION,
+  normalizeAdaptationReport,
   normalizeReleaseSource,
+  normalizeStoredAdaptationStatus,
   packageJson,
   releaseDetailJson,
   releaseJson,
   releaseListJson,
+  type RedeemedAdaptation,
   type ReleaseSourceHeaders,
 } from './plugin-registry-model';
 import { compareStrictSemVer, parseStrictSemVer } from './plugin-semver';
@@ -73,6 +77,9 @@ import { resolveMarketplacePrice } from './marketplace-commerce-calculator';
 import { projectMarketplaceQualityGateTx } from './marketplace-quality-projection';
 
 type UploadResult = { path: string; directory: string; sha256: string; sizeBytes: number };
+
+/** 适配报告暂存位存活时长：够开发者看完报告、点「修复后再发布」，又不至于长期占库。 */
+const ADAPTATION_REPORT_TTL_MS = 30 * 60 * 1000;
 
 const RELEASE_LIST_SELECT = {
   id: true,
@@ -408,9 +415,64 @@ export class PluginRegistryService {
       manifestErrors,
       aiPolicy: {
         ok: policy.ok,
-        diagnostics: policy.diagnostics.map((d) => ({ code: d.code, path: d.path, message: d.message })),
+        diagnostics: policy.diagnostics.map((d) => ({
+          code: d.code,
+          path: d.path,
+          message: d.message,
+        })),
       },
     };
+  }
+
+  /**
+   * 暂存客户端跑出来的 AdaptationReport，换一个纯 ASCII 的 reportId。
+   * HTTP 头是 ASCII-only 且网关普遍限到 8~32 KiB，装不下含中文的完整报告，
+   * 所以发布请求只带 id，报告本体走这个 JSON body 端点。
+   */
+  async stageAdaptationReport(userId: string, report: unknown) {
+    const membership = await this.auth.ensureCurrentTeam(userId);
+    const normalized = normalizeAdaptationReport(report);
+    const expiresAt = new Date(Date.now() + ADAPTATION_REPORT_TTL_MS);
+    const staged = await this.prisma.pluginAdaptationReport.create({
+      data: {
+        userId,
+        teamId: membership.teamId,
+        status: normalized.status,
+        report: normalized.report,
+        expiresAt,
+      },
+      select: { id: true },
+    });
+    return {
+      reportId: staged.id,
+      status: normalized.status,
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
+
+  /**
+   * 一次性兑付暂存的适配报告：归属、TTL、未兑付三个条件全部写进 WHERE，
+   * 用 updateMany 的受影响行数当作 CAS，避免并发下同一 id 被兑付两次。
+   * 兑付失败一律退化成「没有报告」而不是报错——发布本身不该被留证环节卡死。
+   */
+  private async redeemAdaptationReport(
+    reportId: string | undefined,
+    userId: string,
+    teamId: string
+  ): Promise<RedeemedAdaptation> {
+    const id = reportId?.trim();
+    if (!id) return NO_ADAPTATION;
+    const claimed = await this.prisma.pluginAdaptationReport.updateMany({
+      where: { id, userId, teamId, consumedAt: null, expiresAt: { gt: new Date() } },
+      data: { consumedAt: new Date() },
+    });
+    if (claimed.count !== 1) return NO_ADAPTATION;
+    const row = await this.prisma.pluginAdaptationReport.findUnique({
+      where: { id },
+      select: { report: true, status: true },
+    });
+    if (!row) return NO_ADAPTATION;
+    return { report: row.report, status: normalizeStoredAdaptationStatus(row.status) };
   }
 
   async publishTeamRelease(
@@ -421,7 +483,12 @@ export class PluginRegistryService {
     sourceHeaders: ReleaseSourceHeaders = {}
   ) {
     const membership = await this.auth.ensureCurrentTeam(userId);
-    const source = normalizeReleaseSource(sourceHeaders);
+    const adaptation = await this.redeemAdaptationReport(
+      sourceHeaders.adaptationReportId,
+      userId,
+      membership.teamId
+    );
+    const source = normalizeReleaseSource(sourceHeaders, adaptation);
     let staged: UploadResult;
     try {
       staged = await this.spoolUpload(stream, contentLength);

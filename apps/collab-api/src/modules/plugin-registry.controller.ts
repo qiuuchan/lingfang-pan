@@ -52,7 +52,7 @@ export class PluginRegistryController {
     @Headers('x-plugin-source-kind') sourceKind?: string,
     @Headers('x-plugin-source-label-b64') sourceLabelBase64?: string,
     @Headers('x-client') client?: string,
-    @Headers('x-adaptation-report') adaptationReport?: string
+    @Headers('x-adaptation-report-id') adaptationReportId?: string
   ) {
     return this.registry.publishTeamRelease(
       requireUser(req).id,
@@ -63,9 +63,18 @@ export class PluginRegistryController {
         sourceKind,
         sourceLabelBase64,
         ingestChannel: client?.trim().toLowerCase() === 'desktop' ? 'DESKTOP' : 'API',
-        adaptationReport,
+        adaptationReportId,
       }
     );
+  }
+
+  @RequirePermission('team.plugin.upload')
+  @Post('plugin-registry/adaptation-reports')
+  @ApiOperation({
+    summary: '暂存适配报告换取 reportId（HTTP 头装不下含中文的完整 AdaptationReport）',
+  })
+  stageAdaptationReport(@Req() req: Request, @Body() body: { report?: unknown }) {
+    return this.registry.stageAdaptationReport(requireUser(req).id, body?.report);
   }
 
   @RequirePermission('team.plugin.upload')

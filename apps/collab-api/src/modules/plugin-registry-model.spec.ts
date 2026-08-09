@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertDryRunPayloadSize,
   highestSemVer,
+  normalizeAdaptationReport,
   normalizeReleaseSource,
   normalizeStoredAdaptationStatus,
   PLUGIN_DRY_RUN_MAX_FILES,
@@ -29,10 +30,13 @@ describe('plugin registry model helpers', () => {
     expect(normalizeReleaseSource({ ingestChannel: 'adapt' }).ingestChannel).toBe('ADAPT');
   });
 
-  it('keeps a well-formed adaptation report and marks the release as ADAPT-ingested', () => {
+  it('keeps a redeemed adaptation report and marks the release as ADAPT-ingested', () => {
     const report = JSON.stringify({ status: 'ADAPTED_PASSED', engineVersion: '0.1.0' });
     expect(
-      normalizeReleaseSource({ ingestChannel: 'desktop', adaptationReport: report })
+      normalizeReleaseSource(
+        { ingestChannel: 'desktop', adaptationReportId: 'r-1' },
+        { report, status: 'ADAPTED_PASSED' }
+      )
     ).toMatchObject({
       adaptationReport: report,
       adaptationStatus: 'ADAPTED_PASSED',
@@ -43,32 +47,45 @@ describe('plugin registry model helpers', () => {
   it('still records a failed adaptation run as ADAPT-ingested', () => {
     // 跑过但没过也是走了流水线，审核侧要能按渠道捞出来看报告。
     expect(
-      normalizeReleaseSource({
-        ingestChannel: 'desktop',
-        adaptationReport: JSON.stringify({ status: 'NEEDS_HUMAN' }),
-      })
+      normalizeReleaseSource(
+        { ingestChannel: 'desktop' },
+        { report: '{"status":"NEEDS_HUMAN"}', status: 'NEEDS_HUMAN' }
+      )
     ).toMatchObject({ adaptationStatus: 'NEEDS_HUMAN', ingestChannel: 'ADAPT' });
   });
 
-  it('downgrades unknown, oversized or unparsable adaptation reports to NOT_RUN', () => {
-    // 客户端自造状态不得直接落库成为审核依据。
+  it('leaves the declared channel intact when no report was redeemed', () => {
+    // 兑付失败（过期/已用过/不属于本团队）不该被伪装成走过适配流水线。
     expect(
-      normalizeReleaseSource({ adaptationReport: JSON.stringify({ status: 'TOTALLY_FINE' }) })
-    ).toMatchObject({ adaptationStatus: 'NOT_RUN' });
-    expect(normalizeReleaseSource({ adaptationReport: 'not json' })).toMatchObject({
-      adaptationReport: null,
-      adaptationStatus: 'NOT_RUN',
-    });
-    expect(
-      normalizeReleaseSource({
-        ingestChannel: 'desktop',
-        adaptationReport: JSON.stringify({ status: 'ADAPTED_PASSED', pad: 'x'.repeat(33 * 1024) }),
-      })
+      normalizeReleaseSource({ ingestChannel: 'desktop', adaptationReportId: 'stale' })
     ).toMatchObject({
       adaptationReport: null,
       adaptationStatus: 'NOT_RUN',
       ingestChannel: 'DESKTOP',
     });
+  });
+
+  it('whitelists the status claimed by a staged adaptation report', () => {
+    // 客户端自造状态不得直接落库成为审核依据。
+    expect(normalizeAdaptationReport({ status: 'TOTALLY_FINE' })).toMatchObject({
+      status: 'NOT_RUN',
+    });
+    expect(normalizeAdaptationReport({ status: 'ADAPTED_FAILED' })).toMatchObject({
+      status: 'ADAPTED_FAILED',
+      report: '{"status":"ADAPTED_FAILED"}',
+    });
+  });
+
+  it('rejects non-object and oversized adaptation reports at the staging boundary', () => {
+    // 静默丢弃会让开发者以为报告已留证，必须显式报错。
+    expect(() => normalizeAdaptationReport('not json')).toThrow(/必须是 JSON 对象/);
+    expect(() => normalizeAdaptationReport(null)).toThrow(/必须是 JSON 对象/);
+    expect(() => normalizeAdaptationReport([{ status: 'ADAPTED_PASSED' }])).toThrow(
+      /必须是 JSON 对象/
+    );
+    expect(() =>
+      normalizeAdaptationReport({ status: 'ADAPTED_PASSED', pad: 'x'.repeat(513 * 1024) })
+    ).toThrow(/512 KiB/);
   });
 
   it('caps adaptation dry-run payloads at the request boundary', () => {
@@ -77,7 +94,10 @@ describe('plugin registry model helpers', () => {
       assertDryRunPayloadSize(Array.from({ length: PLUGIN_DRY_RUN_MAX_FILES + 1 }, () => ({})))
     ).toThrow(/最多支持/);
     expect(() =>
-      assertDryRunPayloadSize([{ content: 'x'.repeat(5 * 1024 * 1024) }, { content: 'x'.repeat(5 * 1024 * 1024) }])
+      assertDryRunPayloadSize([
+        { content: 'x'.repeat(5 * 1024 * 1024) },
+        { content: 'x'.repeat(5 * 1024 * 1024) },
+      ])
     ).toThrow(/超过 8 MiB/);
   });
 

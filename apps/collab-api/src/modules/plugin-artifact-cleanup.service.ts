@@ -36,7 +36,16 @@ export class PluginArtifactCleanupService implements OnModuleInit, OnModuleDestr
     const removedStaging = await cleanupStaging(
       process.env.PLUGIN_ARTIFACT_STAGING_DIR || join(tmpdir(), 'lingfang-plugin-artifacts')
     );
-    return { removedArtifacts, removedStaging };
+    // 适配报告暂存位只在「跑完适配 → 发布」这几分钟内有用，过期行必须扫掉，
+    // 否则未发布的失败适配会把几百 KiB 的报告永久堆在库里。
+    const removedAdaptationReports = await this.prisma.pluginAdaptationReport.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
+    return {
+      removedArtifacts,
+      removedStaging,
+      removedAdaptationReports: removedAdaptationReports.count,
+    };
   }
 }
 

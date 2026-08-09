@@ -1379,3 +1379,83 @@ describe('PluginRegistryService', () => {
     expect(tx.pluginEntitlement.create).not.toHaveBeenCalled();
   });
 });
+
+describe('adaptation report staging', () => {
+  const teamId = packageRow().ownerTeamId;
+
+  function redeemer(registry: PluginRegistryService) {
+    return (
+      registry as unknown as {
+        redeemAdaptationReport(
+          reportId: string | undefined,
+          userId: string,
+          teamId: string
+        ): Promise<{ report: string | null; status: string }>;
+      }
+    ).redeemAdaptationReport.bind(registry);
+  }
+
+  it('stores the report under the caller team and whitelists the claimed status', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'report-1' });
+    const registry = service(
+      { pluginAdaptationReport: { create } },
+      { ensureCurrentTeam: vi.fn().mockResolvedValue({ teamId }) }
+    );
+
+    const staged = await registry.stageAdaptationReport('user-1', {
+      status: 'I_SWEAR_ITS_FINE',
+      issues: [{ message: '缺少 manifest.runtime 字段' }],
+    });
+
+    expect(staged.reportId).toBe('report-1');
+    // 客户端自造状态只能退化成 NOT_RUN，拿不到 ADAPT 标记。
+    expect(staged.status).toBe('NOT_RUN');
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ userId: 'user-1', teamId, status: 'NOT_RUN' }),
+      })
+    );
+    // 中文报告原样入库——这正是 HTTP 头承载不了、必须改 reportId 的原因。
+    expect(create.mock.calls[0][0].data.report).toContain('缺少 manifest.runtime 字段');
+  });
+
+  it('redeems a staged report exactly once, scoped to owner and TTL', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const findUnique = vi
+      .fn()
+      .mockResolvedValue({ report: '{"status":"ADAPTED_PASSED"}', status: 'ADAPTED_PASSED' });
+    const registry = service({ pluginAdaptationReport: { updateMany, findUnique } }, {});
+
+    await expect(redeemer(registry)('report-1', 'user-1', teamId)).resolves.toEqual({
+      report: '{"status":"ADAPTED_PASSED"}',
+      status: 'ADAPTED_PASSED',
+    });
+    // 归属、未兑付、未过期三个条件都必须写进 WHERE，否则并发下同一 id 会被兑付两次。
+    expect(updateMany.mock.calls[0][0].where).toMatchObject({
+      id: 'report-1',
+      userId: 'user-1',
+      teamId,
+      consumedAt: null,
+    });
+    expect(updateMany.mock.calls[0][0].where.expiresAt.gt).toBeInstanceOf(Date);
+  });
+
+  it('degrades to no-report when the id is stale, foreign or already consumed', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const findUnique = vi.fn();
+    const registry = service({ pluginAdaptationReport: { updateMany, findUnique } }, {});
+
+    // 兑付失败不该让整次发布挂掉，只是拿不到 ADAPT 标记。
+    await expect(redeemer(registry)('report-1', 'other-user', teamId)).resolves.toEqual({
+      report: null,
+      status: 'NOT_RUN',
+    });
+    expect(findUnique).not.toHaveBeenCalled();
+
+    await expect(redeemer(registry)(undefined, 'user-1', teamId)).resolves.toEqual({
+      report: null,
+      status: 'NOT_RUN',
+    });
+    expect(updateMany).toHaveBeenCalledTimes(1);
+  });
+});
