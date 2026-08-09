@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
+  PluginManifest,
   satisfiesActionVersionRange,
   type WorkflowFrozenSubplan,
   type WorkflowUpgradeSuggestionResponse,
@@ -31,6 +32,7 @@ import {
 import { AuthService } from './auth.service';
 import { PLUGIN_AI_POLICY_VERSION } from './plugin-ai-policy';
 import { assertPluginAiPolicy } from './plugin-ai-policy-enforcement';
+import { checkPluginAiPolicy, type PluginAiPolicyFile } from './plugin-ai-policy';
 import { inspectPluginArtifact, PLUGIN_ARTIFACT_MAX_BYTES } from './plugin-artifact';
 import {
   ADMIN_PACKAGE_DETAIL_SELECT,
@@ -55,6 +57,7 @@ import {
   type AdminPluginPackageQuery,
 } from './plugin-registry-admin';
 import {
+  assertDryRunPayloadSize,
   highestSemVer,
   listingJson,
   normalizeReleaseSource,
@@ -89,6 +92,7 @@ const RELEASE_LIST_SELECT = {
   aiPolicyVersion: true,
   aiPolicyStatus: true,
   aiPolicyReason: true,
+  adaptationStatus: true,
   createdAt: true,
 } satisfies Prisma.PluginReleaseSelect;
 
@@ -376,6 +380,39 @@ export class PluginRegistryService {
     }
   }
 
+  /**
+   * 服务端适配干跑：仅做 manifest 符号级校验 + AI 策略闸门，不执行插件、不安装依赖。
+   * 供跳过桌面端的 CLI/API 上传在发布前自检。返回可直接展示给开发者的 issue 列表。
+   */
+  async dryRunAdaptation(
+    manifest: unknown,
+    files: PluginAiPolicyFile[] = []
+  ): Promise<{
+    ok: boolean;
+    manifestValid: boolean;
+    manifestErrors: Array<{ path: string; message: string }>;
+    aiPolicy: { ok: boolean; diagnostics: Array<{ code: string; path: string; message: string }> };
+  }> {
+    assertDryRunPayloadSize(files);
+    const parsed = PluginManifest.safeParse(manifest);
+    const manifestErrors: Array<{ path: string; message: string }> = [];
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        manifestErrors.push({ path: issue.path.join('.'), message: issue.message });
+      }
+    }
+    const policy = checkPluginAiPolicy({ manifest, files });
+    return {
+      ok: parsed.success && policy.ok,
+      manifestValid: parsed.success,
+      manifestErrors,
+      aiPolicy: {
+        ok: policy.ok,
+        diagnostics: policy.diagnostics.map((d) => ({ code: d.code, path: d.path, message: d.message })),
+      },
+    };
+  }
+
   async publishTeamRelease(
     userId: string,
     stream: Readable,
@@ -492,6 +529,8 @@ export class PluginRegistryService {
             aiPolicyVersion: policy.policyVersion,
             aiPolicyStatus: 'PASSED',
             aiPolicyReason: '',
+            adaptationStatus: source.adaptationStatus,
+            runEvidence: source.adaptationReport,
           },
         });
         if (workflowSnapshot) {
@@ -726,7 +765,9 @@ export class PluginRegistryService {
         release.aiPolicyStatus === 'PASSED';
       if (!accessiblePackage || !accessibleRelease) throw forbidden('无权查看该插件发行版');
     }
-    return { release: releaseDetailJson(release) };
+    // 适配报告含开发者本机的运行输出（路径、stderr 片段），只回给作者团队；
+    // 购买方/市场访客拿到的详情里该字段恒为 null。
+    return { release: releaseDetailJson(release, { includeRunEvidence: isOwnerTeam }) };
   }
 
   async workflowUpgradeSuggestions(

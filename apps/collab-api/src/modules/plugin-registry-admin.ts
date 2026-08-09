@@ -1,6 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { badRequest } from '../common';
-import { highestSemVer, type ReleaseSourceKind } from './plugin-registry-model';
+import {
+  highestSemVer,
+  normalizeStoredAdaptationStatus,
+  type ReleaseSourceKind,
+} from './plugin-registry-model';
 
 export type AdminPageQuery = {
   page?: number;
@@ -68,6 +72,7 @@ export const ADMIN_RELEASE_SUMMARY_SELECT = {
   aiPolicyVersion: true,
   aiPolicyStatus: true,
   aiPolicyReason: true,
+  adaptationStatus: true,
   createdAt: true,
 } as const satisfies Prisma.PluginReleaseSelect;
 
@@ -87,6 +92,8 @@ export const ADMIN_RELEASE_CORE_SELECT = {
   aiPolicyVersion: true,
   aiPolicyStatus: true,
   aiPolicyReason: true,
+  adaptationStatus: true,
+  runEvidence: true,
   reviewedById: true,
   reviewedAt: true,
   createdAt: true,
@@ -221,6 +228,7 @@ function latestReleaseSummary(release: AdminReleaseSummaryRow | null) {
     aiPolicyVersion: release.aiPolicyVersion,
     aiPolicyStatus: release.aiPolicyStatus,
     aiPolicyReason: release.aiPolicyReason,
+    adaptationStatus: normalizeStoredAdaptationStatus(release.adaptationStatus),
     createdAt: release.createdAt.toISOString(),
   };
 }
@@ -296,6 +304,7 @@ export function adminReleaseSummary(
     aiPolicyVersion: release.aiPolicyVersion,
     aiPolicyStatus: release.aiPolicyStatus,
     aiPolicyReason: release.aiPolicyReason,
+    adaptationStatus: normalizeStoredAdaptationStatus(release.adaptationStatus),
     isMarketplaceCurrent: listing?.status === 'ACTIVE' && listing.currentReleaseId === release.id,
     createdAt: release.createdAt.toISOString(),
   };
@@ -320,6 +329,8 @@ export function adminReleaseCore(release: AdminReleaseCoreRow) {
       aiPolicyVersion: release.aiPolicyVersion,
       aiPolicyStatus: release.aiPolicyStatus,
       aiPolicyReason: release.aiPolicyReason,
+      adaptationStatus: normalizeStoredAdaptationStatus(release.adaptationStatus),
+      runEvidence: release.runEvidence,
       reviewedById: release.reviewedById,
       reviewedAt: iso(release.reviewedAt),
       createdAt: release.createdAt.toISOString(),

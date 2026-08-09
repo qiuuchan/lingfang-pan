@@ -30,6 +30,7 @@ import { MarketplaceCommerceService } from './marketplace-commerce.service';
 import { SubmitMarketplaceDto } from './dto/plugins.dto';
 import { PluginRegistryService } from './plugin-registry.service';
 import { MarketplaceDiscoveryService } from './marketplace-discovery.service';
+import { type PluginAiPolicyFile } from './plugin-ai-policy';
 
 @ApiTags('Plugin Registry')
 @ApiBearerAuth()
@@ -50,7 +51,8 @@ export class PluginRegistryController {
     @Headers('content-length') contentLength?: string,
     @Headers('x-plugin-source-kind') sourceKind?: string,
     @Headers('x-plugin-source-label-b64') sourceLabelBase64?: string,
-    @Headers('x-client') client?: string
+    @Headers('x-client') client?: string,
+    @Headers('x-adaptation-report') adaptationReport?: string
   ) {
     return this.registry.publishTeamRelease(
       requireUser(req).id,
@@ -61,8 +63,18 @@ export class PluginRegistryController {
         sourceKind,
         sourceLabelBase64,
         ingestChannel: client?.trim().toLowerCase() === 'desktop' ? 'DESKTOP' : 'API',
+        adaptationReport,
       }
     );
+  }
+
+  @RequirePermission('team.plugin.upload')
+  @Post('plugin-registry/adapt')
+  @ApiOperation({
+    summary: '适配检验改造干跑：仅 manifest 符号级校验 + AI 策略闸门（不执行插件、不装依赖）',
+  })
+  adaptDryRun(@Body() body: { manifest: unknown; files?: PluginAiPolicyFile[] }) {
+    return this.registry.dryRunAdaptation(body.manifest, body.files ?? []);
   }
 
   @RequirePermission('team.plugin.list')

@@ -13,6 +13,16 @@ export const PluginReleaseStatus = z.enum(['PUBLISHED', 'YANKED']);
 export const PluginReleaseReviewStatus = z.enum(['DRAFT', 'PENDING', 'APPROVED', 'REJECTED']);
 export const PluginAiPolicyStatus = z.enum(['UNCHECKED', 'PASSED', 'FAILED']);
 export type PluginAiPolicyStatus = z.infer<typeof PluginAiPolicyStatus>;
+
+/** 灵坊适配检验改造流水线产出的最终状态（随发布请求上送，服务端信任存储）。 */
+export const AdaptationStatus = z.enum(['NOT_RUN', 'ADAPTED_PASSED', 'ADAPTED_FAILED', 'NEEDS_HUMAN']);
+export type AdaptationStatus = z.infer<typeof AdaptationStatus>;
+/** 适配报告原文（AdaptationReport JSON），仅在详情/审核面暴露。 */
+export const RunEvidence = z
+  .string()
+  .max(32 * 1024)
+  .nullable()
+  .default(null);
 export const MarketplaceListingStatus = z.enum(['DRAFT', 'ACTIVE', 'DELISTED']);
 export const PluginReleaseSourceKind = z.enum([
   'LINGFANG_CREATOR',
@@ -25,7 +35,7 @@ export const PluginReleaseSourceKind = z.enum([
 ]);
 export type PluginReleaseSourceKind = z.infer<typeof PluginReleaseSourceKind>;
 
-export const PluginIngestChannel = z.enum(['DESKTOP', 'API', 'MIGRATION']);
+export const PluginIngestChannel = z.enum(['DESKTOP', 'API', 'MIGRATION', 'ADAPT']);
 export type PluginIngestChannel = z.infer<typeof PluginIngestChannel>;
 
 export const MarketplaceDelistActor = z.enum(['OWNER', 'PLATFORM']);
@@ -76,6 +86,7 @@ export const PluginReleaseSummary = z.object({
   aiPolicyVersion: z.number().int().nonnegative().default(0),
   aiPolicyStatus: PluginAiPolicyStatus.default('UNCHECKED'),
   aiPolicyReason: z.string().max(1000).default(''),
+  adaptationStatus: AdaptationStatus.default('NOT_RUN'),
   createdAt: z.string().datetime(),
 });
 export type PluginReleaseSummary = z.infer<typeof PluginReleaseSummary>;
@@ -85,6 +96,8 @@ export const PluginReleaseDetail = PluginReleaseSummary.extend({
     .string()
     .max(256 * 1024)
     .default(''),
+  // 完整适配报告最大 32 KiB，只挂在单条详情上，避免列表响应被证据 blob 撑爆。
+  runEvidence: RunEvidence,
 });
 export type PluginReleaseDetail = z.infer<typeof PluginReleaseDetail>;
 
@@ -166,6 +179,7 @@ export const AdminPluginReleaseSummary = z
     aiPolicyVersion: z.number().int().nonnegative().default(0),
     aiPolicyStatus: PluginAiPolicyStatus.default('UNCHECKED'),
     aiPolicyReason: z.string().max(1000).default(''),
+    adaptationStatus: AdaptationStatus.default('NOT_RUN'),
     createdAt: z.string().datetime(),
   })
   .strict();
@@ -277,6 +291,9 @@ export const AdminPluginReleaseCore = z
     aiPolicyVersion: z.number().int().nonnegative().default(0),
     aiPolicyStatus: PluginAiPolicyStatus.default('UNCHECKED'),
     aiPolicyReason: z.string().max(1000).default(''),
+    adaptationStatus: AdaptationStatus.default('NOT_RUN'),
+    // 审核员需要看到运行确证原文，故审核核心视图保留完整报告。
+    runEvidence: RunEvidence,
     createdAt: z.string().datetime(),
   })
   .strict();

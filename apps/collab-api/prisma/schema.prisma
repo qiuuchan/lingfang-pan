@@ -79,6 +79,7 @@ enum PluginIngestChannel {
   DESKTOP
   API
   MIGRATION
+  ADAPT
 }
 
 enum MarketplaceListingStatus {
@@ -715,6 +716,8 @@ model PluginRelease {
   aiPolicyVersion    Int                     @default(0)
   aiPolicyStatus     String                  @default("UNCHECKED")
   aiPolicyReason     String                  @default("")
+  adaptationStatus   String                  @map("adaptation_status") @default("NOT_RUN")
+  runEvidence        String?                 @map("run_evidence")
   createdAt          DateTime                @default(now())
   package            PluginPackage           @relation("PluginPackageReleases", fields: [packageId], references: [id], onDelete: Restrict)
   creator            User?                   @relation("PluginReleaseCreator", fields: [createdById], references: [id], onDelete: SetNull)

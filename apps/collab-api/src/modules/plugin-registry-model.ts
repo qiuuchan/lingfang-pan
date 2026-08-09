@@ -12,7 +12,7 @@ export const RELEASE_SOURCE_KINDS = [
   'UNKNOWN',
 ] as const;
 
-export const PLUGIN_INGEST_CHANNELS = ['DESKTOP', 'API', 'MIGRATION'] as const;
+export const PLUGIN_INGEST_CHANNELS = ['DESKTOP', 'API', 'MIGRATION', 'ADAPT'] as const;
 
 export type ReleaseSourceKind = (typeof RELEASE_SOURCE_KINDS)[number];
 export type PluginIngestChannel = (typeof PLUGIN_INGEST_CHANNELS)[number];
@@ -21,12 +21,27 @@ export type ReleaseSourceHeaders = {
   sourceKind?: string;
   sourceLabelBase64?: string;
   ingestChannel?: string;
+  /** 客户端适配检验改造流水线产出的 AdaptationReport（原始 JSON 字符串）。 */
+  adaptationReport?: string;
 };
+
+export const ADAPTATION_STATUSES = [
+  'NOT_RUN',
+  'ADAPTED_PASSED',
+  'ADAPTED_FAILED',
+  'NEEDS_HUMAN',
+] as const;
+
+export type AdaptationStatus = (typeof ADAPTATION_STATUSES)[number];
 
 export type NormalizedReleaseSource = {
   sourceKind: ReleaseSourceKind;
   sourceLabel: string;
   ingestChannel: PluginIngestChannel;
+  /** 客户端附带的适配报告原始 JSON（已校验可解析），无则 null。 */
+  adaptationReport: string | null;
+  /** 从报告解析出的适配状态，缺省 NOT_RUN。 */
+  adaptationStatus: AdaptationStatus;
 };
 
 function enumValue<T extends readonly string[]>(
@@ -64,11 +79,69 @@ function decodeSourceLabel(raw: string | undefined): string {
 export function normalizeReleaseSource(
   headers: ReleaseSourceHeaders = {}
 ): NormalizedReleaseSource {
+  const adaptation = parseAdaptationReport(headers.adaptationReport);
+  const declaredChannel = enumValue(
+    headers.ingestChannel,
+    PLUGIN_INGEST_CHANNELS,
+    'API',
+    '插件接入通道'
+  );
   return {
     sourceKind: enumValue(headers.sourceKind, RELEASE_SOURCE_KINDS, 'UNKNOWN', '插件来源类型'),
     sourceLabel: decodeSourceLabel(headers.sourceLabelBase64),
-    ingestChannel: enumValue(headers.ingestChannel, PLUGIN_INGEST_CHANNELS, 'API', '插件接入通道'),
+    // 携带了「跑过」的适配报告即视为走适配流水线上传，覆盖调用方声明的通道。
+    // status 已过白名单，所以伪造报告最多退化成 NOT_RUN，拿不到 ADAPT 标记。
+    ingestChannel: adaptation.status === 'NOT_RUN' ? declaredChannel : 'ADAPT',
+    adaptationReport: adaptation.report,
+    adaptationStatus: adaptation.status,
   };
+}
+
+/** 适配干跑的请求体来自不可信客户端，且策略扫描是同步 CPU 密集操作，必须在入口设上限。 */
+export function assertDryRunPayloadSize(files: { content?: string }[]): void {
+  if (files.length > PLUGIN_DRY_RUN_MAX_FILES) {
+    throw badRequest(`适配干跑最多支持 ${PLUGIN_DRY_RUN_MAX_FILES} 个文件`);
+  }
+  let total = 0;
+  for (const file of files) {
+    total += file.content ? Buffer.byteLength(file.content, 'utf8') : 0;
+    if (total > PLUGIN_DRY_RUN_MAX_TOTAL_BYTES) {
+      throw badRequest('适配干跑的源码总量超过 8 MiB，请改用桌面端完整适配流水线');
+    }
+  }
+}
+
+export const PLUGIN_DRY_RUN_MAX_FILES = 2000;
+export const PLUGIN_DRY_RUN_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+
+/**
+ * 仅接受可解析且体积合理的 JSON 报告，避免注入不可信负载。
+ * 报告完全由客户端提供，服务端不执行插件，只做「留证 + 复核」，
+ * 因此 status 必须落在白名单内，否则一律降级为 NOT_RUN——
+ * 绝不能让客户端自定义字符串直接落库成为审核依据。
+ */
+function parseAdaptationReport(raw: string | undefined): {
+  report: string | null;
+  status: AdaptationStatus;
+} {
+  if (!raw || raw.length > 32 * 1024) return { report: null, status: 'NOT_RUN' };
+  const parsed = safeJsonParse(raw);
+  if (!parsed) return { report: null, status: 'NOT_RUN' };
+  const claimed = parsed.status;
+  const status =
+    typeof claimed === 'string' && (ADAPTATION_STATUSES as readonly string[]).includes(claimed)
+      ? (claimed as AdaptationStatus)
+      : 'NOT_RUN';
+  return { report: raw, status };
+}
+
+function safeJsonParse(raw: string): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 type ReleaseJsonInput = {
@@ -90,6 +163,8 @@ type ReleaseJsonInput = {
   aiPolicyVersion?: number;
   aiPolicyStatus?: string;
   aiPolicyReason?: string;
+  adaptationStatus?: string;
+  runEvidence?: string | null;
   createdAt: Date;
 };
 
@@ -113,16 +188,31 @@ export function releaseJson(release: ReleaseJsonInput) {
     aiPolicyVersion: release.aiPolicyVersion ?? 0,
     aiPolicyStatus: release.aiPolicyStatus || 'UNCHECKED',
     aiPolicyReason: release.aiPolicyReason || '',
+    adaptationStatus: normalizeStoredAdaptationStatus(release.adaptationStatus),
     createdAt: release.createdAt.toISOString(),
   };
 }
 
-/** README content is exposed only by the exact immutable release detail route. */
-export function releaseDetailJson(release: ReleaseJsonInput) {
+/**
+ * README 与适配报告原文体积较大，仅由不可变的单条发布详情路由暴露，
+ * 列表投影只带 adaptationStatus 这个枚举。
+ */
+export function releaseDetailJson(
+  release: ReleaseJsonInput,
+  options: { includeRunEvidence?: boolean } = {}
+) {
   return {
     ...releaseJson(release),
     readme_markdown: release.readmeMarkdown || '',
+    runEvidence: options.includeRunEvidence ? (release.runEvidence ?? null) : null,
   };
+}
+
+/** 历史行可能没有该列或存了旧值，读侧同样只认白名单。 */
+export function normalizeStoredAdaptationStatus(raw: string | undefined | null): AdaptationStatus {
+  return typeof raw === 'string' && (ADAPTATION_STATUSES as readonly string[]).includes(raw)
+    ? (raw as AdaptationStatus)
+    : 'NOT_RUN';
 }
 
 export function releaseListJson(release: ReleaseJsonInput) {
