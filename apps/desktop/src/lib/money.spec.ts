@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { centsToYuan, fmtYuan, formatCreditAmount, normalizeCents, roundToCents } from './money';
+import { centsToYuan, fmtYuan, formatCreditAmount, normalizeCents } from './money';
 
 describe('money helpers', () => {
   it('rounds noisy cent values before yuan formatting', () => {
@@ -8,9 +8,13 @@ describe('money helpers', () => {
     expect(fmtYuan(0.4)).toBe('免费');
   });
 
-  it('rounds credit amounts to two decimals and removes negative zero', () => {
-    expect(roundToCents(1.235)).toBe(1.24);
-    expect(roundToCents(-0.0005636999999999999)).toBe(0);
-    expect(formatCreditAmount(-0.0005636999999999999)).toBe('0.00');
+  it('formats 灵石 integer cents (÷100) with thousands separator', () => {
+    // 灵石以整数分存储：1000 分 = 10.00 灵石。
+    expect(formatCreditAmount(1000)).toBe('10.00');
+    expect(formatCreditAmount(123500)).toBe('1,235.00');
+    expect(formatCreditAmount(0)).toBe('0.00');
+    expect(formatCreditAmount(-0.4)).toBe('0.00'); // 极小噪声兜底为 0
+    expect(formatCreditAmount(null)).toBe('0.00');
+    expect(formatCreditAmount(undefined)).toBe('0.00');
   });
 });

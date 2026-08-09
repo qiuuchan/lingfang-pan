@@ -335,7 +335,8 @@ function ChannelDialog({
     if (existing) {
       patch({
         pricingUnit: existing.unit,
-        pricePerUnit: existing.pricePerUnit,
+        // 后端以整数分存储；表单展示「灵石」，故 ÷100。
+        pricePerUnit: existing.pricePerUnit / 100,
         contextWindow: existing.contextWindow ?? undefined,
       });
     }
@@ -391,7 +392,8 @@ function ChannelDialog({
       model,
       label: model,
       unit: form.pricingUnit,
-      pricePerUnit: form.pricePerUnit,
+      // 表单输入为「灵石」，提交时 ×100 转整数分（后端单位）。
+      pricePerUnit: Math.round(form.pricePerUnit * 100),
       contextWindow: form.contextWindow,
       tier: form.tier,
       enabled: true,
@@ -643,7 +645,7 @@ function ChannelDialog({
                 <Input
                   type="number"
                   min={0}
-                  step="0.0001"
+                  step="0.01"
                   value={form.pricePerUnit}
                   onChange={(e) => patch({ pricePerUnit: Number(e.target.value) || 0 })}
                 />

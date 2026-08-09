@@ -31,10 +31,10 @@ function mockPrisma(tx = mockTx()) {
       findUnique: vi.fn(async ({ where }: { where: { key: string } }) => ({
         value:
           where.key === 'creditSignupBonus'
-            ? '1000'
+            ? '100000' // 1000 灵石（整数分）
             : where.key === 'creditReserveCapFast'
-              ? '200'
-              : '2000',
+              ? '20000'
+              : '200000',
       })),
     },
     creditLedger: { findMany: vi.fn(async () => []) },
@@ -142,8 +142,9 @@ describe('CreditService reserve/reconcile/refund', () => {
     expect(debitCreate?.[0].data.amount).toBe(200);
   });
 
-  it('reconcile: 四舍五入到两位小数，极小浮点噪声不扣款', async () => {
-    const charged = await svc.reconcile('t1', 0, -0.0005636999999999999, 'log1', 'u1');
+  it('reconcile: 整数分兜底，极小浮点噪声不扣款', async () => {
+    // roundCredits 现为整数分取整（Math.round），负数噪声向上入 0。
+    const charged = await svc.reconcile('t1', 0, -0.4, 'log1', 'u1');
     expect(charged).toBe(0);
     expect(tx.teamCredit.update).not.toHaveBeenCalled();
     const consumeCreate = tx.creditLedger.create.mock.calls.find(
@@ -151,11 +152,11 @@ describe('CreditService reserve/reconcile/refund', () => {
     );
     expect(consumeCreate).toBeUndefined();
 
-    tx.$queryRaw.mockResolvedValueOnce([{ balance: 500 }]);
-    const chargedRounded = await svc.reconcile('t1', 0, 1.235, 'log2', 'u1');
-    expect(chargedRounded).toBe(1.24);
+    tx.$queryRaw.mockResolvedValueOnce([{ balance: 5000 }]);
+    const chargedRounded = await svc.reconcile('t1', 0, 123.6, 'log2', 'u1');
+    expect(chargedRounded).toBe(124); // 123.6 → 取整 124 分
     expect(tx.teamCredit.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { balance: { decrement: 1.24 } } })
+      expect.objectContaining({ data: { balance: { decrement: 124 } } })
     );
   });
 
@@ -165,7 +166,7 @@ describe('CreditService reserve/reconcile/refund', () => {
       {
         id: 'l1',
         teamId: 't1',
-        amount: 1.235,
+        amount: 123500, // 1235.00 灵石（整数分）
         direction: 'DEBIT',
         source: 'llm_consume',
         reason: 'AI 对话消费',
@@ -176,7 +177,7 @@ describe('CreditService reserve/reconcile/refund', () => {
       {
         id: 'l2',
         teamId: 't1',
-        amount: -0.0005636999999999999,
+        amount: -0.4, // 极小噪声，整数分取整后归 0
         direction: 'DEBIT',
         source: 'llm_consume',
         reason: 'AI 对话消费',
@@ -190,7 +191,7 @@ describe('CreditService reserve/reconcile/refund', () => {
     ] as never);
 
     const rows = await svc.getLedger('t1');
-    expect(rows[0]).toMatchObject({ id: 'l1', amount: 1.24, tier: 'FAST' });
+    expect(rows[0]).toMatchObject({ id: 'l1', amount: 123500, tier: 'FAST' });
     expect(rows[1]).toMatchObject({ id: 'l2', amount: 0, tier: null });
   });
 

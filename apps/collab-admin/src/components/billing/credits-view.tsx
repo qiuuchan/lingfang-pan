@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { run } from '@/lib/helpers';
+import { formatCredits } from '@/lib/types';
 import { Section } from '@/components/shared';
 import {
   Table,
@@ -94,7 +95,7 @@ export function CreditsView() {
             teams.map((t) => (
               <TableRow key={t.id}>
                 <TableCell className="font-medium">{t.name}</TableCell>
-                <TableCell className="tabular-nums">{t.balance.toLocaleString()}</TableCell>
+                <TableCell className="tabular-nums">{formatCredits(t.balance)}</TableCell>
                 <TableCell className="text-muted-foreground">{t.memberCount}</TableCell>
                 <TableCell>
                   <AdjustDialog team={t} onSaved={load}>
@@ -144,7 +145,8 @@ function AdjustDialog({
   const [direction, setDirection] = useState<'CREDIT' | 'DEBIT'>('CREDIT');
   const [reason, setReason] = useState('');
   async function submit() {
-    const body = { amount: Number(amount), direction, reason: reason.trim() };
+    // 表单输入为「灵石」，提交时 ×100 转整数分（后端单位）。
+    const body = { amount: Math.round(Number(amount) * 100), direction, reason: reason.trim() };
     if (!body.amount || body.amount <= 0) return;
     if (!body.reason) return;
     if (
@@ -168,14 +170,15 @@ function AdjustDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>调整灵石 · {team.name}</DialogTitle>
-          <DialogDescription>当前余额 {team.balance.toLocaleString()} 灵石</DialogDescription>
+          <DialogDescription>当前余额 {formatCredits(team.balance)} 灵石</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
             <Label>金额（灵石）</Label>
             <Input
               type="number"
-              min={1}
+              min="0.01"
+              step="0.01"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
@@ -258,7 +261,7 @@ function LedgerDialog({ team, children }: { team: TeamRow; children: React.React
                       }
                     >
                       {r.direction === 'CREDIT' ? '+' : '-'}
-                      {r.amount}
+                      {formatCredits(r.amount)}
                     </TableCell>
                   </TableRow>
                 ))

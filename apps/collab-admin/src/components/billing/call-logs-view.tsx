@@ -31,6 +31,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import type { LlmCallLog } from '@/lib/types';
+import { formatCredits } from '@/lib/types';
 
 function statusBadge(s: string) {
   if (s === 'success') return <Badge variant="success">成功</Badge>;
@@ -164,7 +165,7 @@ export function CallLogsView() {
                     <span className="text-xs text-muted-foreground">—</span>
                   )}
                 </TableCell>
-                <TableCell className="tabular-nums">{l.credits}</TableCell>
+                <TableCell className="tabular-nums">{formatCredits(l.credits)}</TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">
                   {(l.durationMs / 1000).toFixed(1)}s
                 </TableCell>
@@ -232,7 +233,7 @@ function CallLogDetail({ summary }: { summary: LlmCallLog }) {
                 ['输入 token', log.inputTokens],
                 ['输出 token', log.outputTokens],
                 ['生图张数', log.images],
-                ['灵石', log.credits],
+                ['灵石', formatCredits(log.credits)],
                 ['耗时', `${(log.durationMs / 1000).toFixed(2)}s`],
                 ['HTTP', log.httpStatus ?? '—'],
                 ['错误码', log.errorCode ?? '—'],

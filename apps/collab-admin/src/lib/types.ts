@@ -161,7 +161,7 @@ export type ModelPricing = {
   model: string;
   label: string;
   unit: PricingUnit;
-  pricePerUnit: number;
+  pricePerUnit: number; // 灵石单价（整数分；1 灵石=100 分）
   tier: ModelTier | null;
   contextWindow?: number | null;
   enabled: boolean;
@@ -182,7 +182,7 @@ export type LlmCallLog = {
   outputTokens: number;
   images: number;
   durationMs: number;
-  credits: number;
+  credits: number; // 本次实扣灵石（整数分；1 灵石=100 分）
   status: string;
   httpStatus: number | null;
   errorCode: string | null;
@@ -576,6 +576,18 @@ export function yuanToCents(value: string) {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount < 0) throw new Error('金额格式不正确');
   return Math.round(amount * 100);
+}
+
+/** 灵石（整数分，1 灵石=100 分）格式化为展示用字符串「X.XX」（带千分位）。后端一律以整数分存储与传输。 */
+export function formatCredits(cents: number | null | undefined): string {
+  const c = cents ?? 0;
+  if (!Number.isFinite(c)) return '0.00';
+  const rounded = Math.round(c); // 已是整数分；兜底消除浮点噪声
+  const safe = rounded === 0 ? 0 : rounded; // 把 -0 归正，避免渲染成 "-0.00"
+  return (safe / 100).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 export function activeMembers(team: Team) {

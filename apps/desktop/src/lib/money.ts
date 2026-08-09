@@ -1,4 +1,5 @@
 // 金额工具：后端一律以「分」(cents) 传输，前端统一格式化为「¥X.XX」。
+// 灵石（AI 计费货币）同样以整数分存储（1 灵石=100 分），formatCreditAmount 负责 ÷100 展示。
 
 /** 规整到整数分，屏蔽后端/JS 浮点噪声。 */
 export function normalizeCents(cents: number | null | undefined): number {
@@ -7,16 +8,16 @@ export function normalizeCents(cents: number | null | undefined): number {
   return Math.round(n);
 }
 
-/** 规整到两位小数，用于灵石等以小数直接计量的余额/流水。 */
-export function roundToCents(value: number | null | undefined): number {
-  const n = value ?? 0;
-  if (!Number.isFinite(n)) return 0;
-  const rounded = Math.round(n * 100) / 100;
-  return Object.is(rounded, -0) ? 0 : rounded;
-}
-
+/** 灵石（整数分）格式化为展示用「X.XX」（÷100，带千分位）。后端灵石余额/流水一律为整数分。 */
 export function formatCreditAmount(value: number | null | undefined): string {
-  return roundToCents(value).toFixed(2);
+  const c = value ?? 0;
+  if (!Number.isFinite(c)) return '0.00';
+  const cents = Math.round(c); // 已是整数分；兜底消除浮点噪声
+  const safe = cents === 0 ? 0 : cents; // 把 -0 归正，避免渲染成 "-0.00"
+  return (safe / 100).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 /// 分 → 「¥X.XX」。免费（0 分）返回「免费」。

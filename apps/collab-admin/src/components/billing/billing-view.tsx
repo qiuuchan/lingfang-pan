@@ -34,6 +34,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import type { ModelPricing, PricingUnit, ModelTier } from '@/lib/types';
+import { formatCredits } from '@/lib/types';
 
 const UNIT_LABEL: Record<PricingUnit, string> = {
   PER_TOKEN_INPUT: '每1M输入token',
@@ -192,7 +193,7 @@ function PricingFormFields({ form, setForm }: { form: any; setForm: (n: any) => 
           <Label>单价（灵石）</Label>
           <Input
             type="number"
-            step="0.0001"
+            step="0.01"
             min={0}
             value={form.pricePerUnit}
             onChange={(e) => patch({ pricePerUnit: Number(e.target.value) || 0 })}
@@ -281,7 +282,7 @@ export function BillingView() {
                     <div className="font-mono text-xs text-muted-foreground">{p.model}</div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{UNIT_LABEL[p.unit]}</TableCell>
-                  <TableCell className="tabular-nums">{p.pricePerUnit}</TableCell>
+                  <TableCell className="tabular-nums">{formatCredits(p.pricePerUnit)}</TableCell>
                   <TableCell>
                     {p.enabled ? (
                       <Badge variant="success" className="gap-1.5">
@@ -347,7 +348,13 @@ function CreatePricingDialog({
   const [form, setForm] = useState(emptyPricingForm());
   async function create() {
     if (!form.model.trim()) return toast.error('输入模型/动作 key');
-    const body = { ...form, model: form.model.trim(), label: form.label.trim() };
+    const body = {
+      ...form,
+      model: form.model.trim(),
+      label: form.label.trim(),
+      // 表单输入为「灵石」，提交时 ×100 转整数分（后端单位）。
+      pricePerUnit: Math.round(form.pricePerUnit * 100),
+    };
     if (
       !(await run(
         () => api('/api/admin/billing/pricing', { method: 'POST', body }).then(onRefresh),
@@ -393,7 +400,8 @@ function EditPricingDialog({
     model: pricing.model,
     label: pricing.label,
     unit: pricing.unit,
-    pricePerUnit: pricing.pricePerUnit,
+    // 后端以整数分存储；表单展示「灵石」，故 ÷100。
+    pricePerUnit: pricing.pricePerUnit / 100,
     contextWindow: (pricing as any).contextWindow,
     tier: pricing.tier,
     enabled: pricing.enabled,
@@ -405,14 +413,19 @@ function EditPricingDialog({
         model: pricing.model,
         label: pricing.label,
         unit: pricing.unit,
-        pricePerUnit: pricing.pricePerUnit,
+        pricePerUnit: pricing.pricePerUnit / 100,
         contextWindow: (pricing as any).contextWindow,
         tier: pricing.tier,
         enabled: pricing.enabled,
       });
   }, [open, pricing]);
   async function save() {
-    const body = { ...form, model: form.model.trim() };
+    const body = {
+      ...form,
+      model: form.model.trim(),
+      // 表单输入为「灵石」，提交时 ×100 转整数分（后端单位）。
+      pricePerUnit: Math.round(form.pricePerUnit * 100),
+    };
     if (
       !(await run(
         () =>

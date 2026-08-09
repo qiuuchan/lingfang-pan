@@ -51,6 +51,7 @@ type VideoGenerateResult = {
   task_id: string;
   call_log_id: string;
   charged: boolean;
+  // 已扣灵石（非分）：后端内部以整数分存储与计费，SDK 在此 ÷100 维持插件作者「灵石」契约（P2-1）。
   credits: number;
 };
 type PluginFile = { path: string; content: string };
@@ -591,8 +592,19 @@ export const sdk = {
   // 注入平台 RBFLow 凭证转发 → 返回 { task_id, call_log_id }。
   // 防绕过：插件不持有任何 RBFLow 凭证；stream/download 进度与下载走桥 GET /video/stream、/video/download
   // （非 capability，插件自行拼路径调桥，不经此 SDK namespace）。
+  // 视频生成：后端返回 { task_id, call_log_id, charged, credits }（credits 为整数分）。
+  // 此处将 credits ÷100 还原为插件作者契约的「灵石」，避免静默的 breaking change（P2-1）。
   video: {
-    generate: (input: VideoGenerateInput) => invokeAi<VideoGenerateResult>('video.generate', input),
+    generate: async (input: VideoGenerateInput): Promise<VideoGenerateResult> => {
+      const data = await invokeAi<Record<string, unknown>>('video.generate', input);
+      const rawCredits = typeof data.credits === 'number' ? data.credits : 0;
+      return {
+        task_id: String(data.task_id ?? ''),
+        call_log_id: String(data.call_log_id ?? ''),
+        charged: Boolean(data.charged),
+        credits: rawCredits / 100,
+      };
+    },
   },
   plugin: {
     upload: (input: PluginUploadInput) => invoke<unknown>('plugin.upload', input),

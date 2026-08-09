@@ -106,7 +106,7 @@ function build(cap: number, opts: Parameters<typeof makeCredits>[1] = {}) {
   };
   const credits = makeCredits(cap, opts);
   const pricing = {
-    lookupPrice: vi.fn(async () => ({ unit: 'PER_TOKEN_OUTPUT', pricePerUnit: 1000 })),
+    lookupPrice: vi.fn(async () => ({ unit: 'PER_TOKEN_OUTPUT', pricePerUnit: 100000 })),
     lookupMinContextWindow: vi.fn(async () => null),
     computeCredits: vi.fn(() => 0),
   };
@@ -514,7 +514,7 @@ function buildVideo(
   seconds: number,
   opts: { reserveThrows?: boolean; rbflowStatus?: number; rbflowBody?: unknown } = {}
 ) {
-  const pricePerUnit = 0.5;
+  const pricePerUnit = 50; // 灵石单价（整数分；1 灵石=100 分）→ 0.5 灵石/秒
   const expectedCredits = pricePerUnit * Math.max(1, Math.ceil(seconds)); // 与 computeCredits 语义一致
   const prisma = {
     llmCallLog: {
@@ -597,7 +597,7 @@ describe('RelayService.videoGenerations 按秒计费 + RBFLow 转发', () => {
     expect(credits.refund).not.toHaveBeenCalled();
   });
 
-  it('小数秒数向上取整：45.2 秒 → 46 秒，扣 0.5×46=23 灵石', async () => {
+  it('小数秒数向上取整：45.2 秒 → 46 秒，扣 50×46=2300 分（23.00 灵石）', async () => {
     mockRbflowFetch(200, { task_id: 'rh-2' });
     const { svc, expectedCredits } = buildVideo(45.2, {
       rbflowStatus: 200,
@@ -788,7 +788,7 @@ function buildAudio(
   promptText: string,
   opts: { reserveThrows?: boolean; rbflowStatus?: number; rbflowBody?: unknown } = {}
 ) {
-  const pricePerUnit = 0.5;
+  const pricePerUnit = 50; // 灵石单价（整数分；1 灵石=100 分）→ 0.5 灵石/秒
   const seconds = estSeconds(promptText);
   const expectedCredits = pricePerUnit * Math.max(1, Math.ceil(seconds));
   const prisma = {
@@ -854,7 +854,7 @@ describe('RelayService.audioGenerations 按输出秒数计费 + RBFLow /tasks/vo
     expect(credits.refund).not.toHaveBeenCalled();
   });
 
-  it('秒数由文本长度估算：40 字 → 10 秒，扣 0.5×10=5 灵石', async () => {
+  it('秒数由文本长度估算：40 字 → 10 秒，扣 50×10=500 分（5.00 灵石）', async () => {
     mockRbflowFetch(200, { task_id: 'v2' });
     const text = '字'.repeat(40);
     const { svc, expectedCredits } = buildAudio(text, {
