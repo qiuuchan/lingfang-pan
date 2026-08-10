@@ -15,7 +15,6 @@ use crate::plugin_artifact_v4::{
     collect_workspace_source_files, extract_artifact, inspect_artifact, package_workspace,
     sha256_bytes, sha256_file, InspectedArtifact,
 };
-use crate::plugin_security;
 use crate::plugin_store::{read_json, write_json, PluginStore};
 
 pub(crate) mod commands;
