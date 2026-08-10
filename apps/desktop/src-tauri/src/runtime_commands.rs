@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::runtime_resolver::RuntimeResolver;
+use crate::runtime_resolver::{RuntimeResolver, RuntimeSource};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,14 +37,30 @@ enum RuntimeKind {
 pub fn get_runtime_status(app: tauri::AppHandle) -> Result<RuntimeStatusMap, String> {
     let resolver = RuntimeResolver::resolve(&app)?;
     Ok(RuntimeStatusMap {
-        python: status_for(resolver.python(), RuntimeKind::Python),
-        node: status_for(resolver.node(), RuntimeKind::Node),
-        ffmpeg: status_for(resolver.ffmpeg(), RuntimeKind::Ffmpeg),
-        chromium: status_for(resolver.chromium(), RuntimeKind::Chromium),
+        python: status_for(
+            resolver.python(),
+            RuntimeKind::Python,
+            resolver.python_source(),
+        ),
+        node: status_for(resolver.node(), RuntimeKind::Node, resolver.node_source()),
+        ffmpeg: status_for(
+            resolver.ffmpeg(),
+            RuntimeKind::Ffmpeg,
+            resolver.ffmpeg_source(),
+        ),
+        chromium: status_for(
+            resolver.chromium(),
+            RuntimeKind::Chromium,
+            resolver.chromium_source(),
+        ),
     })
 }
 
-fn status_for(binary: Option<PathBuf>, kind: RuntimeKind) -> RuntimeStatus {
+fn status_for(
+    binary: Option<PathBuf>,
+    kind: RuntimeKind,
+    source: Option<&RuntimeSource>,
+) -> RuntimeStatus {
     let Some(binary) = binary else {
         return RuntimeStatus {
             available: false,
@@ -57,14 +73,14 @@ fn status_for(binary: Option<PathBuf>, kind: RuntimeKind) -> RuntimeStatus {
     match probe_version(&binary, kind) {
         Ok(version) => RuntimeStatus {
             available: true,
-            source: Some("bundled"),
+            source: source.map(RuntimeSource::label),
             version: Some(version),
             binary_path: Some(binary.to_string_lossy().to_string()),
             error: None,
         },
         Err(error) => RuntimeStatus {
             available: true,
-            source: Some("bundled"),
+            source: source.map(RuntimeSource::label),
             version: None,
             binary_path: Some(binary.to_string_lossy().to_string()),
             error: Some(error),
@@ -119,10 +135,22 @@ mod tests {
 
     #[test]
     fn missing_runtime_is_read_only_packaging_error() {
-        let status = status_for(None, RuntimeKind::Chromium);
+        let status = status_for(None, RuntimeKind::Chromium, None);
         assert!(!status.available);
         assert_eq!(status.source, None);
         assert!(status.error.unwrap().contains("安装包可能不完整"));
+    }
+
+    #[test]
+    fn resolved_runtime_reports_source_label() {
+        let status = status_for(
+            None,
+            RuntimeKind::Chromium,
+            Some(&RuntimeSource::Bundled),
+        );
+        // binary 缺失时 source 保持 None（避免把「来源」显示在不可用运行时上）。
+        assert_eq!(status.source, None);
+        assert_eq!(RuntimeSource::Bundled.label(), "bundled");
     }
 
     #[test]

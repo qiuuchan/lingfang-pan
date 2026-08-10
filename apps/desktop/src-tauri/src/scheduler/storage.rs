@@ -43,7 +43,7 @@ impl SchedulerStorage {
     }
 
     fn task_dir(&self, task_id: &str) -> PathBuf {
-        self.root.join("tasks").join(sanitize_id(task_id))
+        self.root().join("tasks").join(sanitize_id(task_id))
     }
 
     fn task_file(&self, task_id: &str) -> PathBuf {
@@ -91,7 +91,7 @@ impl SchedulerStorage {
 
     /// 列出所有任务目录下的 task.json。
     pub(crate) fn list_tasks(&self) -> Vec<LocalSchedule> {
-        let tasks_root = self.root.join("tasks");
+        let tasks_root = self.root().join("tasks");
         let entries = match fs::read_dir(&tasks_root) {
             Ok(e) => e,
             Err(_) => return Vec::new(),

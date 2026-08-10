@@ -34,13 +34,21 @@ pub(crate) enum RuntimeSource {
     Bundled,
 }
 
+impl RuntimeSource {
+    /// 来源标签（与前端 runtimeStatus.source 展示约定一致）。
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            RuntimeSource::Bundled => "bundled",
+        }
+    }
+}
+
 /// 单个运行时的解析结果（dir + 来源）。
 #[derive(Clone, Debug)]
 struct ResolvedRuntime {
     /// 直接含主 exe 的目录。
     dir: PathBuf,
     /// 来源标签（Step 5 设置页 UI 展示用）。
-    #[allow(dead_code)]
     source: RuntimeSource,
 }
 
@@ -165,7 +173,7 @@ impl RuntimeResolver {
     }
 
     pub(crate) fn chromium(&self) -> Option<PathBuf> {
-        self.chromium.as_ref().map(|r| chromium_exe(&r.dir))
+        self.chromium_dir().map(chromium_exe)
     }
 
     pub(crate) fn playwright_browsers_dir(&self) -> Option<PathBuf> {
@@ -180,7 +188,7 @@ impl RuntimeResolver {
         self.python.as_ref().map(|r| r.dir.as_path())
     }
 
-    /// Node 主 exe 所在目录（供 UI 状态展示）。
+    /// Node 主 exe 所在目录（备用 API：UI 状态已走 binary_path 展示，暂无调用方）。
     #[allow(dead_code)]
     pub(crate) fn node_dir(&self) -> Option<&Path> {
         self.node.as_ref().map(|r| r.dir.as_path())
@@ -200,12 +208,10 @@ impl RuntimeResolver {
         self.python.as_ref().map(|r| &r.source)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn node_source(&self) -> Option<&RuntimeSource> {
         self.node.as_ref().map(|r| &r.source)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn ffmpeg_source(&self) -> Option<&RuntimeSource> {
         self.ffmpeg.as_ref().map(|r| &r.source)
     }

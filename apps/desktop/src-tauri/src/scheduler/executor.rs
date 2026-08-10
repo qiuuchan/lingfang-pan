@@ -239,6 +239,7 @@ async fn run_one_task(app: &AppHandle, task: LocalSchedule) -> Result<(), String
                 "task_id": task.id,
                 "run_id": run_id,
                 "started_at": started_at,
+                "type": task.payload.type_tag(),
                 "plugin_id": plugin_id,
                 "action": action,
                 "input": task.payload,
@@ -278,6 +279,7 @@ async fn run_one_task(app: &AppHandle, task: LocalSchedule) -> Result<(), String
             "task_id": task.id,
             "run_id": run_id,
             "started_at": started_at,
+            "type": task.payload.type_tag(),
         }),
     );
 
@@ -288,20 +290,50 @@ async fn run_one_task(app: &AppHandle, task: LocalSchedule) -> Result<(), String
 
     let run = match result {
         Ok(Ok(record)) => {
-            // 前端正常回写。
-            LocalScheduleRun {
-                id: run_id.clone(),
-                task_id: task.id.clone(),
-                started_at,
-                finished_at: Some(finished_at),
-                status: match record.status {
-                    LocalScheduleRunRecordStatus::Success => LocalScheduleRunStatus::Success,
-                    LocalScheduleRunRecordStatus::Failed => LocalScheduleRunStatus::Failed,
-                },
-                skip_reason: None,
-                error: record.error,
-                output_summary: record.output_summary,
-                duration_ms: Some(duration_ms),
+            // 前端正常回写。校验 task_id 防串台；优先用前端回传的真实执行起止时间（含 agent
+            // 思考/执行时长），缺失或非法时兜底 executor 自计时。
+            if record.task_id != task.id {
+                pending.cancel(&run_id);
+                LocalScheduleRun {
+                    id: run_id.clone(),
+                    task_id: task.id.clone(),
+                    started_at: started_at.clone(),
+                    finished_at: Some(finished_at.clone()),
+                    status: LocalScheduleRunStatus::Failed,
+                    skip_reason: None,
+                    error: Some("回写记录 task_id 与任务不匹配，记录已丢弃".to_string()),
+                    output_summary: None,
+                    duration_ms: Some(duration_ms),
+                }
+            } else {
+                let record_started = record.started_at.trim();
+                let record_finished = record.finished_at.trim();
+                let (actual_started, actual_finished, actual_duration) =
+                    if !record_started.is_empty() && !record_finished.is_empty() {
+                        let d =
+                            parse_iso_delta(record_finished, record_started).unwrap_or(duration_ms);
+                        (
+                            record.started_at.clone(),
+                            Some(record.finished_at.clone()),
+                            d,
+                        )
+                    } else {
+                        (started_at.clone(), Some(finished_at.clone()), duration_ms)
+                    };
+                LocalScheduleRun {
+                    id: run_id.clone(),
+                    task_id: task.id.clone(),
+                    started_at: actual_started,
+                    finished_at: actual_finished,
+                    status: match record.status {
+                        LocalScheduleRunRecordStatus::Success => LocalScheduleRunStatus::Success,
+                        LocalScheduleRunRecordStatus::Failed => LocalScheduleRunStatus::Failed,
+                    },
+                    skip_reason: None,
+                    error: record.error,
+                    output_summary: record.output_summary,
+                    duration_ms: Some(actual_duration),
+                }
             }
         }
         Ok(Err(_)) => {

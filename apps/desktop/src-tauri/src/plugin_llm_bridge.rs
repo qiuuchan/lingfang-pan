@@ -837,20 +837,8 @@ fn route_image_edit(session: &BridgeSession, body_bytes: Vec<u8>) -> BridgeResul
                     format!("image.edit 第 {index} 张图片缺少 data(base64)"),
                 )
             })?;
-        let bytes = BASE64_STANDARD.decode(data_b64.trim()).map_err(|_| {
-            BridgeError::new(
-                400,
-                "bad_request",
-                format!("image.edit 第 {index} 张图片 data 不是合法 base64"),
-            )
-        })?;
-        if bytes.is_empty() {
-            return Err(BridgeError::new(
-                400,
-                "bad_request",
-                format!("image.edit 第 {index} 张图片数据为空"),
-            ));
-        }
+        // base64 → 原始字节（复用视频/音频桥的同款解码与空值校验）。
+        let bytes = decode_required_base64(&format!("image.edit 第 {index} 张图片"), data_b64)?;
         decoded.push((filename, mime, bytes));
     }
 
