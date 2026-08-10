@@ -104,7 +104,7 @@ npx vitest run src/adapt/__tests__/adapt.spec.ts -t "P3 A2"
 
 Batch A 的硬性门槛（不通过则回退）：隔离加固后，内置 `calculator`（Tkinter GUI，`apps/desktop/builtin-plugins/calculator/manifest.json`，`runtime_type: python`）**必须仍能弹出窗口**。`JOB_OBJECT_UILIMIT_DESKTOP` 与资源限制（64 进程 / 4GiB / CPU 80% / `UI_RESTRICTIONS_DEFAULT`）可能阻断窗口创建——若受阻，将其列入豁免或调低 UI 限制（见 `d:\lf-pan\P1-3-EXECUTION-ISOLATION-PLAN.md:89`）。
 
-"UI 受限 Job" **不是用户配置项**，由 `SandboxPolicy::plugin_entry()` 自动施加（`apps/desktop/src-tauri/src/process_util/guarded_spawn.rs:116`）。逃生开关：`LINGFANG_SANDBOX_SOFT=1`。
+"UI 受限 Job" **不是用户配置项**，由 `SandboxPolicy::plugin_entry()` 自动施加（`apps/desktop/src-tauri/src/process_util/guarded_spawn.rs:116`）。逃生开关：以 `--sandbox-soft` 参数启动灵坊（P1-9 起不再走环境变量 `LINGFANG_SANDBOX_SOFT`——那是插件写 `HKCU\Environment` 就能持久打开的自助降级面）。
 
 | 步骤 | 操作 | 通过 = 具体现象 |
 |------|------|----------------|

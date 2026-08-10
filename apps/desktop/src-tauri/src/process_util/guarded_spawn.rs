@@ -23,14 +23,34 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
+use std::sync::OnceLock;
 
 use super::binary::build_spawn_command;
 use super::sandbox::SandboxHandle;
 
-/// 逃生开关：置 `1` 时任何档位都不 fail-closed，只降级 + log。
+/// 逃生开关：宿主启动时带上该命令行参数，任何档位都不 fail-closed，只降级 + log。
 ///
 /// 用途：Windows 家庭版/受限企业策略/容器等 Job Object 不可用的环境，避免插件完全不能启动。
-const SANDBOX_SOFT_ENV: &str = "LINGFANG_SANDBOX_SOFT";
+///
+/// **P1-9：为什么不再用环境变量 `LINGFANG_SANDBOX_SOFT`**——环境变量是插件够得着的写入面：
+/// 插件子进程往 `HKCU\Environment` 写一条同名变量并广播 `WM_SETTINGCHANGE`，无需任何提权就能
+/// 让宿主**下次启动**自动继承 `=1`，等于给自己配了个持久化的沙箱关闭开关，
+/// 而这正是 [`SandboxTier`] 注释里明令要避免的「插件自助降级」。
+/// 命令行参数由启动者一次性决定，已运行的宿主进程的 argv 不可被子进程改写。
+const SANDBOX_SOFT_FLAG: &str = "--sandbox-soft";
+
+/// argv 中是否出现逃生开关。抽出来是为了能脱离全局进程状态做单测。
+fn sandbox_soft_in<I: IntoIterator<Item = OsString>>(args: I) -> bool {
+    args.into_iter().any(|arg| arg == SANDBOX_SOFT_FLAG)
+}
+
+/// 进程级快照：首次调用时读一次 argv 并永久缓存。
+///
+/// 用 `args_os` 而非 `args`：后者遇到非 UTF-8 参数会 panic，不能让一个畸形参数把宿主带崩。
+fn sandbox_soft_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| sandbox_soft_in(std::env::args_os()))
+}
 
 /// 插件来源档位 → 沙箱失败时的行为。
 ///
@@ -48,7 +68,7 @@ pub(crate) enum SandboxTier {
     Builtin,
     /// 用户安装的插件：位于 `plugins_root`（远端签名安装 或 本地草稿）。
     /// 来源不可信 → **沙箱失败即 fail-closed**：套不上围栏就不许跑。
-    /// 逃生开关 `LINGFANG_SANDBOX_SOFT=1` 可临时降级（供 Job Object 不可用的异常环境）。
+    /// 逃生开关 `--sandbox-soft` 可临时降级（供 Job Object 不可用的异常环境）。
     UserInstalled,
     /// 豁免：宿主自身的工具链调用（venv 创建、pip/pnpm 安装、运行时探测、Agent 开发 shell）。
     /// Step 0 保持零行为变更；Step 6 再逐通道换成真实策略。
@@ -58,8 +78,7 @@ pub(crate) enum SandboxTier {
 impl SandboxTier {
     /// 沙箱不可用时是否拒绝启动。
     pub(crate) fn fail_closed(self) -> bool {
-        matches!(self, SandboxTier::UserInstalled)
-            && !matches!(std::env::var(SANDBOX_SOFT_ENV).as_deref(), Ok("1"))
+        matches!(self, SandboxTier::UserInstalled) && !sandbox_soft_enabled()
     }
 }
 
@@ -316,7 +335,7 @@ impl GuardedCommand {
                         terminate_suspended(&child);
                         return Err(format!(
                             "插件沙箱不可用，已拒绝启动（用户安装的插件强制隔离）：{error}。\
-                             如需临时放行，设置环境变量 {SANDBOX_SOFT_ENV}=1"
+                             如需临时放行，以 {SANDBOX_SOFT_FLAG} 参数启动灵坊"
                         ));
                     }
                     on_log(format!("沙箱不可用，降级为无围栏运行：{error}"));
@@ -518,10 +537,24 @@ mod tests {
         assert!(!SandboxTier::Exempt.fail_closed());
     }
 
+    /// P1-9 回归：逃生开关只认 argv 里一个完整的 `--sandbox-soft` token。
+    ///
+    /// 这里同时钉死「不看环境变量」：即便 argv 里塞的是旧的环境变量写法，也不得放行——
+    /// 插件能改 `HKCU\Environment`，改不了宿主已经起来的命令行。
+    #[test]
+    fn sandbox_soft_only_matches_exact_cli_flag() {
+        let os = |s: &str| OsString::from(s);
+        assert!(sandbox_soft_in([os("lingfang.exe"), os("--sandbox-soft")]));
+        assert!(!sandbox_soft_in([os("lingfang.exe")]));
+        assert!(!sandbox_soft_in([os("--sandbox-softly")]));
+        assert!(!sandbox_soft_in([os("--sandbox-soft=0")]));
+        assert!(!sandbox_soft_in([os("LINGFANG_SANDBOX_SOFT=1")]));
+    }
+
     #[test]
     fn install_policy_is_sandboxed_and_fails_closed() {
         // 依赖安装通道执行第三方 setup.py / postinstall（R7），与插件本体同等不可信：
-        // 必须建 Job 且 sandbox 失败时 fail-closed（SANDBOX_SOFT 逃生开关仍可用）。
+        // 必须建 Job 且 sandbox 失败时 fail-closed（--sandbox-soft 逃生开关仍可用）。
         let policy = SandboxPolicy::install();
         assert!(policy.needs_sandbox(), "安装通道必须建 Job");
         assert!(
