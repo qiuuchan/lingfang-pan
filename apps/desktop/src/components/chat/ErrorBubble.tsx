@@ -89,11 +89,11 @@ export function ErrorBubble({ error, onRetry }: { error: CreatorError; onRetry?:
     }
   };
 
-  // 联系支持：mailto 深链预填主题与正文，让用户一键发邮件反馈（需运营配置真实支持邮箱）。
-  // 首版用占位邮箱，避免硬编码不存在地址；后续接入帮助中心后改为站内反馈入口。
+  // 联系支持：mailto 深链预填主题与正文，让用户一键发邮件反馈。
+  // 当前指向可达的真实收件箱；后续接入帮助中心后改为站内反馈入口。
   const supportSubject = encodeURIComponent(`插件创建问题反馈：${error.title}`);
   const supportBody = encodeURIComponent(`${errorReport}\n\n—— 来自灵方桌面客户端错误反馈`);
-  const supportHref = `mailto:support@lingfang.example?subject=${supportSubject}&body=${supportBody}`;
+  const supportHref = `mailto:panjz2333@gmail.com?subject=${supportSubject}&body=${supportBody}`;
 
   return (
     <div
