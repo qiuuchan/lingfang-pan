@@ -112,9 +112,13 @@ Batch A 的硬性门槛（不通过则回退）：隔离加固后，内置 `calc
 | d2 | 观察窗口 | **计算器 Tkinter 窗口实际弹出且可交互**（按键有响应） |
 | d3 | 校对隔离未越界 | 插件进程不在默认桌面/剪贴板/句柄列表里（`guarded_spawn.rs` 断言 DESKTOP/clipboard/HANDLES 不泄漏） |
 | d4 | **管理员**账户重复 d1–d3 | 同样弹窗成功，无回归 |
-| d5（可选 harness） | `python d:\lf-pan\.spike\job_ui_spike.py` | 子进程打印 `TK_OK mapped=… width=…`（非 `TK_FAIL:<reason>`） |
+| d5（harness） | `python d:\lf-pan\.spike\job_ui_spike.py` | 子进程打印 `TK_OK mapped=… width=…`（非 `TK_FAIL:<reason>`）；结果见 `d:\lf-pan\.spike\job_ui_spike.result.txt` |
 
-> 现状说明（诚实标记）：计划文档标注该 gate "未执行"；但较新的 `guarded_spawn.rs` 声称 Tkinter calculator 与 Playwright/Chromium 各 22 组用例已全通过。**结论冲突，需本清单 d1–d4 在真机跑一次坐实**。`d:\lf-pan\.spike\` 下暂无结果文件。
+> **现状（2026-08-10 实测坐实，结论冲突已消除）**：spike gate 已在本机（Administrator 账户，Windows）实际跑通，原「计划标注未执行 vs guarded_spawn 声称 22 组全通过」的冲突以**实测全通过**收口：
+> - **Tkinter（`job_ui_spike.py`，16 组）**：baseline / 仅 KILL_ON_CLOSE / 各 `UILIMIT_*` 位（**含 `DESKTOP`**）/ 资源配额（ActiveProcess=32、ProcessMemory=2GB、CpuRate=80%）/ 全套组合 —— 全 `TK_OK mapped=True width=240`。即 calculator 弹窗不受 UI 受限 Job 影响，`DESKTOP` 位在本机也未阻断 Tkinter。
+> - **Playwright/Chromium（`pw_job_spike.py`，22 组）**：headless + headed 各 `UILIMIT_*` 位 + 资源配额 + 推荐组合 —— 全 `PW_OK`，Job 内峰值 **12** 活跃进程（远低于 64 上限，`qianniu-panel` 的 Chromium 嵌套 Job 不会打爆 `ACTIVE_PROCESS_LIMIT`）。
+> - 结果文件：`d:\lf-pan\.spike\job_ui_spike.result.txt`、`pw_job_spike.result.txt`。
+> **待补（UAC 双账户硬性要求）**：本机仅 Administrator 已验，**标准用户**账户下需再跑一次 d1–d4 确认不回归；若标准用户下 `DESKTOP`/clipboard 等行为与 Administrator 有差异，按 `P1-3-EXECUTION-ISOLATION-PLAN.md` 将 calculator 列入豁免或调低 UI 限制。
 
 ### 判定标准（总览）
 
