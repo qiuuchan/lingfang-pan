@@ -1456,8 +1456,13 @@ model Role {
   users       User[]           @relation("UserPlatformRole")
   memberships TeamMembership[] @relation("MembershipTeamRole")
 
-  // 同 scope+teamId 下角色名不重复。code 同 scope+teamId 下唯一（可选；null 各行独立）。
-  // Postgres 中多列 unique 对 null 值各行独立（平台级 teamId=null 仍全局唯一）。
+  // 同 scope+teamId 下角色名不重复。code 同 scope+teamId 下唯一（可选；code=null 各行独立）。
+  // 注意（P1-2 订正）：Postgres 默认 NULL != NULL，平台级角色 teamId=null 时这两个约束
+  // 根本不参与唯一判定——同名 / 同 code 的平台角色可被重复插入，此前注释写反了。
+  // 迁移 20260810000000_unique_nulls_not_distinct 把这两个索引重建为 NULLS NOT DISTINCT（PG15+），
+  // 使 teamId=null 也参与比较；code 索引另加 WHERE "code" IS NOT NULL，保留「未填 code 的角色互不冲突」。
+  // Prisma 7 的 PSL 无法表达该修饰符，索引名沿用默认名，改动只存在于迁移 SQL——
+  // 后续 migrate dev 若重新生成这两个索引，务必手工补回修饰符，勿静默回退。
   @@unique([scope, teamId, name])
   @@unique([scope, teamId, code])
   @@index([scope, teamId])
@@ -2161,6 +2166,10 @@ model ModelPricing {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
+  // tier 可空，Postgres 默认 NULL != NULL 会让「该模型所有版本同价」的行可重复插入
+  // （同一 capability+model 出现多条 tier=null 定价，取价结果不确定）。
+  // 迁移 20260810000000_unique_nulls_not_distinct 将该索引重建为 NULLS NOT DISTINCT，
+  // 使 tier=null 参与唯一判定；PSL 无法表达该修饰符，勿在 migrate dev 中静默回退。
   @@unique([capability, model, tier])
   @@index([capability, enabled])
 }
