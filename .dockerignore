@@ -22,11 +22,11 @@ dist
 **/dist
 build
 
-# Env files (use .env.collab for Docker)
-.env
-.env.*
-!.env.collab.example
-!.env.collab
+# Env files: never ship secrets into the build context.
+# 运行期配置一律走 compose 的 environment / env_file（不经 build context），
+# 故此处不再对任何 .env* 开取反白名单。
+**/.env
+**/.env.*
 
 # Docs (not needed at build time)
 docs
