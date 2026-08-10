@@ -32,7 +32,7 @@ LingFang 把对话式插件创建、本地隔离运行、v4 插件发行、市�
 flowchart LR
   Desktop["Tauri 桌面工作台"] --> API["NestJS collab-api"]
   Admin["React 管理后台 / 官网"] --> API
-  API --> DB[("PostgreSQL / MySQL")]
+  API --> DB[("PostgreSQL 16+")]
   API -. "可选缓存" .-> Redis[("Redis")]
   Desktop --> Bridge["本地能力桥"]
   Bridge --> Plugin["iframe / Node / Python 插件"]
@@ -58,7 +58,7 @@ flowchart LR
 | ---------- | ------------------------------- |
 | Node.js    | 20+                             |
 | pnpm       | 9+                              |
-| PostgreSQL | 16+，或 MySQL 8+/MariaDB 10.11+ |
+| PostgreSQL | 16+（不支持 MySQL/MariaDB）     |
 | Rust/Cargo | 构建 Tauri 桌面端时需要         |
 | Redis      | 可选                            |
 
@@ -198,7 +198,7 @@ lingfang-platform/
 | 变量                            | 说明                              |
 | ------------------------------- | --------------------------------- |
 | `PORT`                          | API 监听端口；示例为 19006        |
-| `DATABASE_PROVIDER`             | `postgresql` 或 `mysql`           |
+| `DATABASE_PROVIDER`             | 仅支持 `postgresql`               |
 | `DATABASE_URL`                  | 数据库连接串                      |
 | `CACHE_DRIVER` / `REDIS_URL`    | 可选缓存                          |
 | `JWT_SECRET` / `JWT_EXPIRES_IN` | JWT 签名与有效期                  |
@@ -243,7 +243,7 @@ lingfang-platform/
 1. 写代码前读取 `.trellis/spec/` 中对应层规范。
 2. 跨层字段先改 `packages/contract`，再同步服务端、桌面与 SDK。
 3. 新行为增加单测，Bug 修复增加回归测试。
-4. 数据模型变更附 Prisma migration，并验证 PostgreSQL/MySQL 路径。
+4. 数据模型变更附 Prisma migration，并验证 PostgreSQL 路径。
 5. `.lfplugin` 只能用 SDK CLI 构建，不能手工压缩。
 6. 不在插件、日志、UI 或文档中暴露平台密钥、桥 token 或供应商凭证。
 
