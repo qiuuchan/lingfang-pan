@@ -37,7 +37,7 @@ ALTER TABLE "LlmCallLog"
 -- 迁移事务成功语义，再在低峰期显式校验（pg_repack 同理）；小表顺序执行无感知。
 ALTER TABLE "TeamCredit"
   ADD CONSTRAINT "team_credit_balance_nonneg" CHECK ("balance" >= 0) NOT VALID;
-VALIDATE CONSTRAINT "team_credit_balance_nonneg" ON "TeamCredit";
+ALTER TABLE "TeamCredit" VALIDATE CONSTRAINT "team_credit_balance_nonneg";
 
 -- 全局灵石参数（PlatformSetting）由「灵石」改为「分」：×100 回填。
 -- 仅对数值类键值生效（正则守卫，避免误改非数值设置如 aiUsageGuardRule）。
