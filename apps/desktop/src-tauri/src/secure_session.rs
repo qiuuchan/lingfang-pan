@@ -7,6 +7,8 @@
 //! - `encrypt_token`：经 DPAPI `CryptProtectData` 加密后 base64，落盘写入 `token_enc` 字段。
 //!   DPAPI 以当前用户登录会话为密钥，磁盘上是密文，任何 `open()` 直读只能拿到密文；
 //!   要还原 token 必须显式调用 `CryptUnprotectData`，抬高了插件子进程窃取的门槛。
+//!   P1-6 起额外绑定应用专属 `pOptionalEntropy`（见 `SESSION_ENTROPY`），使同用户下的
+//!   其他进程既解不开我们的密文，也伪造不出我们会接受的会话文件。
 //! - `harden_file_acl`：把文件 DACL 设为仅当前用户完全控制且不可继承（PROTECTED_DACL），
 //!   挡掉其他用户/其他账户进程。best-effort：失败仅记录，不阻断写入
 //!   （DPAPI 已保证内容非明文，默认 app_data 仍限制其他用户）。
@@ -14,7 +16,9 @@
 //! **Unix**：权限（0600）由 `main.rs::persist_auth_token` 处理，本模块完全不接管。
 //!
 //! **兼容性**：读路径（`main.rs::read_auth_token`）优先解 `token_enc`，失败/旧版 `token`
-//! 明文文件回退，保证升级平滑。
+//! 明文文件回退，保证升级平滑。注意 P1-6 之后，**升级前写下的无 entropy 密文会解不开**，
+//! 此时按无会话处理、用户重登一次即完成迁移——这是刻意选择的 fail-closed 行为，
+//! 详见 `decrypt_token` 内注释。
 
 use std::path::Path;
 
@@ -35,6 +39,25 @@ mod imp {
     // CRYPTPROTECT_UI_FORBIDDEN：禁止弹出 UI（桌面端无交互场景，且避免阻塞）。
     const CRYPTPROTECT_UI_FORBIDDEN: u32 = 0x1;
 
+    /// P1-6：DPAPI 的 `pOptionalEntropy`（次要熵）。
+    ///
+    /// 不传 entropy 时，密文只以「当前用户登录会话」为界——同一用户下的**任何**进程
+    /// （含被攻破的插件子进程）调一次 `CryptUnprotectData` 就能还原 token，磁盘加密形同虚设。
+    /// 绑上应用专属 entropy 后，只有同时知道这串常量的调用方才解得开。
+    ///
+    /// 定位要说清楚：常量编译进二进制，逆向即可提取，**它不是密钥**。它的作用是
+    /// (1) 挡掉「无差别扫 DPAPI blob」的通用窃密程序；
+    /// (2) 让其他进程无法伪造/替换一份我们会接受的会话文件（注入他人 token）。
+    /// 真正的机密性边界仍是 DPAPI 的用户作用域。
+    const SESSION_ENTROPY: &[u8] = b"lingfang.desktop.session-token.v1";
+
+    fn entropy_blob() -> CRYPT_INTEGER_BLOB {
+        CRYPT_INTEGER_BLOB {
+            cbData: SESSION_ENTROPY.len() as u32,
+            pbData: SESSION_ENTROPY.as_ptr() as *mut u8,
+        }
+    }
+
     /// 明文 token → base64(DPAPI 密文)。失败返回错误（调用方应中断写入）。
     pub(crate) fn encrypt_token(plain: &str) -> Result<String, String> {
         let bytes = plain.as_bytes();
@@ -42,6 +65,7 @@ mod imp {
             cbData: bytes.len() as u32,
             pbData: bytes.as_ptr() as *mut u8,
         };
+        let entropy = entropy_blob();
         let mut out_blob = CRYPT_INTEGER_BLOB {
             cbData: 0,
             pbData: std::ptr::null_mut(),
@@ -50,7 +74,7 @@ mod imp {
             CryptProtectData(
                 &in_blob,
                 std::ptr::null(),
-                std::ptr::null(),
+                &entropy,
                 std::ptr::null(),
                 std::ptr::null(),
                 CRYPTPROTECT_UI_FORBIDDEN,
@@ -81,15 +105,19 @@ mod imp {
             cbData: raw.len() as u32,
             pbData: raw.as_ptr() as *mut u8,
         };
+        let entropy = entropy_blob();
         let mut out_blob = CRYPT_INTEGER_BLOB {
             cbData: 0,
             pbData: std::ptr::null_mut(),
         };
+        // 刻意不给「无 entropy」留回退路径：留了回退就等于宣布「任何同用户进程伪造的
+        // 无 entropy blob 我们照收」，token 注入的口子会一直开着。旧版密文解不开时按
+        // 无会话处理（read_auth_token 已如此兜底），用户重登一次即完成升级。
         let ok = unsafe {
             CryptUnprotectData(
                 &in_blob,
                 std::ptr::null_mut(),
-                std::ptr::null(),
+                &entropy,
                 std::ptr::null(),
                 std::ptr::null(),
                 CRYPTPROTECT_UI_FORBIDDEN,
@@ -244,6 +272,44 @@ mod imp {
         #[test]
         fn decrypt_garbage_fails() {
             assert!(decrypt_token("not-a-valid-base64!!!").is_err());
+        }
+
+        /// P1-6 回归：不带 entropy 加密出来的密文（= 旧版格式，也是同用户其他进程
+        /// 能自行造出来的格式）必须解不开，否则 entropy 等于没加。
+        #[test]
+        fn decrypt_rejects_blob_protected_without_entropy() {
+            let plain = b"eyJhbGciOiJIUzI1Ni.forged.signature";
+            let in_blob = CRYPT_INTEGER_BLOB {
+                cbData: plain.len() as u32,
+                pbData: plain.as_ptr() as *mut u8,
+            };
+            let mut out_blob = CRYPT_INTEGER_BLOB {
+                cbData: 0,
+                pbData: std::ptr::null_mut(),
+            };
+            let ok = unsafe {
+                CryptProtectData(
+                    &in_blob,
+                    std::ptr::null(),
+                    std::ptr::null(), // 关键：不带 entropy
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    CRYPTPROTECT_UI_FORBIDDEN,
+                    &mut out_blob,
+                )
+            };
+            assert_ne!(ok, 0, "构造对照密文应成功");
+            let raw = unsafe {
+                std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize)
+            }
+            .to_vec();
+            unsafe {
+                let _ = LocalFree(out_blob.pbData as HLOCAL);
+            }
+            assert!(
+                decrypt_token(&B64.encode(raw)).is_err(),
+                "无 entropy 的密文必须被拒绝"
+            );
         }
 
         #[test]
