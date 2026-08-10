@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
 import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
@@ -5,6 +6,16 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 
 export const ARTIFACT_STORE = Symbol('ARTIFACT_STORE');
+
+/** 路径不存在（ENOENT）。清理链路据此区分「本来就没有」与「读不动」。 */
+export function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === 'ENOENT'
+  );
+}
 
 export type ArtifactDownload =
   | { kind: 'stream'; stream: NodeJS.ReadableStream; sizeBytes: number }
@@ -38,6 +49,7 @@ function assertArtifactKey(key: string): string {
 }
 
 export class FilesystemArtifactStore implements ArtifactStore {
+  private readonly logger = new Logger(FilesystemArtifactStore.name);
   private readonly root: string;
 
   constructor(root: string) {
@@ -77,12 +89,7 @@ export class FilesystemArtifactStore implements ArtifactStore {
     try {
       info = await stat(path);
     } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'code' in error &&
-        (error as { code?: string }).code === 'ENOENT'
-      ) {
+      if (isMissingPathError(error)) {
         throw new ArtifactUnavailableError(`artifact not found: ${artifactKey}`);
       }
       throw new Error(`读取制品失败：${artifactKey}`, { cause: error });
@@ -97,7 +104,17 @@ export class FilesystemArtifactStore implements ArtifactStore {
   async cleanupOrphans(referencedKeys: Set<string>, olderThanMs: number): Promise<number> {
     let removed = 0;
     const walk = async (directory: string): Promise<void> => {
-      const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+      // 目录不存在 = 没有孤儿要清，属幂等正常路径；其余 I/O 故障（EPERM/EBUSY/EMFILE）
+      // 必须炸出来，否则「清理失败」会被伪装成「清理了 0 个」，孤儿制品无声堆积。
+      const entries = await readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
+        if (isMissingPathError(error)) return null;
+        this.logger.error(
+          `扫描制品目录失败：${directory}`,
+          error instanceof Error ? error.stack : String(error)
+        );
+        throw new Error(`扫描制品目录失败：${directory}`, { cause: error });
+      });
+      if (entries === null) return;
       for (const entry of entries) {
         const path = join(directory, entry.name);
         if (entry.isDirectory()) {
@@ -109,8 +126,17 @@ export class FilesystemArtifactStore implements ArtifactStore {
           .slice(this.root.length + 1)
           .split(sep)
           .join('/');
-        const info = await stat(path).catch(() => null);
-        if (info && !referencedKeys.has(key) && Date.now() - info.mtimeMs >= olderThanMs) {
+        // 并发清理把文件抢先删了属正常竞态，跳过即可；其余故障同样必须上抛。
+        const info = await stat(path).catch((error: unknown) => {
+          if (isMissingPathError(error)) return null;
+          this.logger.error(
+            `读取制品状态失败：${path}`,
+            error instanceof Error ? error.stack : String(error)
+          );
+          throw new Error(`读取制品状态失败：${path}`, { cause: error });
+        });
+        if (info === null) continue;
+        if (!referencedKeys.has(key) && Date.now() - info.mtimeMs >= olderThanMs) {
           await rm(path, { force: true });
           removed += 1;
         }
