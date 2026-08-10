@@ -657,7 +657,7 @@ model BalanceLedger {
   reason      String
   actorUserId String?
   createdAt   DateTime        @default(now())
-  team        Team?           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team        Team?           @relation(fields: [teamId], references: [id], onDelete: Restrict)
   platformAccount MarketplacePlatformAccount? @relation(fields: [platformAccountId], references: [id], onDelete: Restrict)
   purchase    Purchase?       @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
   actor       User?           @relation("LedgerActor", fields: [actorUserId], references: [id])
@@ -2021,7 +2021,7 @@ model CloudUsageEvent {
   pricingDimensions Json @default("{}")
   occurredAt DateTime
   createdAt DateTime @default(now())
-  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Restrict)
   deployment CloudActionDeployment @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
 
   @@unique([sourceKind, sourceId, eventKind])
@@ -2139,7 +2139,7 @@ model CreditLedger {
   actorUserId String? // 触发者（消费=调用者；调整=管理员）
   callLogId   String? // 关联 LlmCallLog（消费/预扣/回退类）
   createdAt   DateTime        @default(now())
-  team        Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team        Team            @relation(fields: [teamId], references: [id], onDelete: Restrict)
   actor       User?           @relation("CreditLedgerActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([teamId, createdAt])
@@ -2206,7 +2206,7 @@ model LlmCallLog {
   // 客户端自报来源，仅作遥测；不参与鉴权、路由、定价或扣费。
   clientSource   String       @default("platform")
   createdAt      DateTime     @default(now())
-  team           Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team           Team         @relation(fields: [teamId], references: [id], onDelete: Restrict)
   user           User?        @relation("CallLogCaller", fields: [userId], references: [id], onDelete: SetNull)
   channel        Channel?     @relation(fields: [channelId], references: [id], onDelete: SetNull)
 
