@@ -151,23 +151,6 @@ fn regex_lite_quotes(content: &str) -> Vec<String> {
     out
 }
 
-#[cfg(test)]
-pub(crate) fn command_preview(binary: &Path, args: &[String]) -> Vec<String> {
-    let mut preview = vec![binary.to_string_lossy().to_string()];
-    preview.extend(args.iter().map(|arg| redact_arg(arg)));
-    preview
-}
-
-#[cfg(test)]
-fn redact_arg(arg: &str) -> String {
-    let lower = arg.to_ascii_lowercase();
-    if lower.contains("token") || lower.contains("key") || lower.contains("secret") {
-        "[redacted]".to_string()
-    } else {
-        arg.to_string()
-    }
-}
-
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
