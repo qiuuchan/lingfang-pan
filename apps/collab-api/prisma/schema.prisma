@@ -1574,6 +1574,7 @@ model ActionInvocation {
   @@index([teamId, status, createdAt])
   @@index([releaseId, actionId, createdAt])
   @@index([rootInvocationId, createdAt])
+  @@index([principalUserId])
   @@index([parentInvocationId])
   @@index([cloudDeploymentId, status])
 }
@@ -1813,6 +1814,7 @@ model WorkflowRun {
   @@index([workflowReleaseId, createdAt])
   @@index([rootRunId, createdAt])
   @@index([desktopExecutorSessionId])
+  @@index([principalUserId])
   @@unique([scheduleId, scheduleGeneration, occurrenceKey])
   @@index([scheduleId, scheduledFor])
 }
@@ -2144,6 +2146,7 @@ model CreditLedger {
 
   @@index([teamId, createdAt])
   @@index([source, createdAt])
+  @@index([actorUserId])
 }
 
 // 模型定价（灵石，整数分）。每个「可计费能力 × 模型/动作 × 可选版本」一行，后台可配。
@@ -2216,4 +2219,5 @@ model LlmCallLog {
   @@index([capability, createdAt])
   @@index([status, createdAt])
   @@index([model, createdAt])
+  @@index([channelId])
 }
