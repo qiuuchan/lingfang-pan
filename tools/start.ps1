@@ -1,4 +1,4 @@
-# LingFang 一键启动脚本（Windows / PowerShell）。
+﻿# LingFang 一键启动脚本（Windows / PowerShell）。
 #
 # 流程：检查依赖 → 校验 collab-api 配置 → 确保数据库可连 → 迁移/同步+建管理员 →
 #       启动 collab-api（NestJS，端口取 .env 的 PORT）→ 等待健康 → 启动桌面壳（Tauri）。
