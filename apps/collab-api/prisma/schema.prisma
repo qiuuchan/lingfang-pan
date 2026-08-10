@@ -1131,6 +1131,11 @@ model Purchase {
   @@index([status, settleAt])
   @@index([discountId])
   @@index([campaignId])
+  // NEW-2：该索引由 20260717110000_marketplace_campaign_attribution 与 campaignItem 外键一并建出，
+  // 但当时漏写进 schema.prisma，导致 migrate diff 一直建议把它删掉。campaignItem 是
+  // onDelete: Restrict 外键，删活动明细时要反查 Purchase，缺索引就退化为全表扫描，
+  // 属于 P1-4 已修过的那类缺陷，故补声明而非删索引。
+  @@index([campaignItemId, createdAt])
   // 组E 性能：按买方团队聚合的高频查询索引。adminTeamDetail 用 buyerTeamId + createdAt desc
   // 拉最近 10 笔购买，此前 buyerTeamId 无索引走全表扫描；按租户的财务聚合同样受益。
   @@index([buyerTeamId, createdAt])
@@ -1719,8 +1724,10 @@ model SharedStateOutbox {
   team                Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
   namespace            PluginSharedNamespace @relation(fields: [namespaceId], references: [id], onDelete: Cascade)
 
+  // NEW-2：这里原先在 @@unique 之外又声明了一条同列同序的 @@index，Postgres 用唯一索引即可
+  // 满足全部同形查询，多出来的普通索引纯属写放大与磁盘开销，迁移链也从未真的建过它。
+  // 故删除冗余声明，让 schema 与库一致。
   @@unique([namespaceId, cursor])
-  @@index([namespaceId, cursor])
   @@index([teamId, createdAt])
   @@index([publishedAt, createdAt])
 }
