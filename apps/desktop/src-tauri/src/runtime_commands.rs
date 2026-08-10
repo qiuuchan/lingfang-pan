@@ -143,14 +143,19 @@ mod tests {
 
     #[test]
     fn resolved_runtime_reports_source_label() {
+        // Chromium 版本探针返回编译期常量、不接触二进制（见 probe_version），
+        // 因此假路径即可走通「已解析运行时上报来源」路径。
         let status = status_for(
-            None,
+            Some(PathBuf::from("C:/fake/chrome.exe")),
             RuntimeKind::Chromium,
             Some(&RuntimeSource::Bundled),
         );
-        // binary 缺失时 source 保持 None（避免把「来源」显示在不可用运行时上）。
-        assert_eq!(status.source, None);
-        assert_eq!(RuntimeSource::Bundled.label(), "bundled");
+        assert!(status.available);
+        assert_eq!(status.source, Some("bundled"));
+        assert_eq!(
+            status.version.as_deref(),
+            Some(crate::runtime_resolver::PLAYWRIGHT_CHROMIUM_VERSION)
+        );
     }
 
     #[test]

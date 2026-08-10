@@ -293,7 +293,7 @@ async fn run_one_task(app: &AppHandle, task: LocalSchedule) -> Result<(), String
             // 前端正常回写。校验 task_id 防串台；优先用前端回传的真实执行起止时间（含 agent
             // 思考/执行时长），缺失或非法时兜底 executor 自计时。
             if record.task_id != task.id {
-                pending.cancel(&run_id);
+                // 无需 pending.cancel：deliver 已先移除表项并投递记录，此处仅丢弃该回写。
                 LocalScheduleRun {
                     id: run_id.clone(),
                     task_id: task.id.clone(),
@@ -308,15 +308,20 @@ async fn run_one_task(app: &AppHandle, task: LocalSchedule) -> Result<(), String
             } else {
                 let record_started = record.started_at.trim();
                 let record_finished = record.finished_at.trim();
+                // 只在前端时间能解析出合法 delta 时才采用，否则起止时间与时长全部回退
+                // executor 自计时，避免把非法时间戳写入 runs.jsonl 破坏时间序排序。
                 let (actual_started, actual_finished, actual_duration) =
                     if !record_started.is_empty() && !record_finished.is_empty() {
-                        let d =
-                            parse_iso_delta(record_finished, record_started).unwrap_or(duration_ms);
-                        (
-                            record.started_at.clone(),
-                            Some(record.finished_at.clone()),
-                            d,
-                        )
+                        match parse_iso_delta(record_finished, record_started) {
+                            Some(d) => (
+                                record_started.to_string(),
+                                Some(record_finished.to_string()),
+                                d,
+                            ),
+                            None => {
+                                (started_at.clone(), Some(finished_at.clone()), duration_ms)
+                            }
+                        }
                     } else {
                         (started_at.clone(), Some(finished_at.clone()), duration_ms)
                     };
