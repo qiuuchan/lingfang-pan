@@ -110,7 +110,7 @@ Batch A 的硬性门槛（不通过则回退）：隔离加固后，内置 `calc
 |------|------|----------------|
 | d1 | 启动 app，打开 计算器 插件（**标准用户**账户下） | 进程以受限 Job 拉起，`plugin:start-progress` 走完 |
 | d2 | 观察窗口 | **计算器 Tkinter 窗口实际弹出且可交互**（按键有响应） |
-| d3 | 校对隔离未越界 | 插件进程不在默认桌面/剪贴板/句柄列表里（`guarded_spawn.rs` 断言 DESKTOP/clipboard/HANDLES 不泄漏） |
+| d3 | 校对隔离未越界 | Job 套用的 `UI_RESTRICTIONS_DEFAULT` 仅启用 **SYSPARAM / DISPLAY / EXITWIN** 三位（**不含 DESKTOP / clipboard / HANDLES**——这些刻意不限制，否则 calculator 弹窗与 clipboard 插件被破）。断言：插件进程**仍可用 DISPLAY（能弹窗）、受 SYSPARAM/EXITWIN 约束**；**不断言**「不在桌面/剪贴板/句柄列表」（`guarded_spawn.rs` 不施加该三位）。真机若观测到额外限制位，按 P1-3 计划豁免/调低。 |
 | d4 | **管理员**账户重复 d1–d3 | 同样弹窗成功，无回归 |
 | d5（harness） | `python d:\lf-pan\.spike\job_ui_spike.py` | 子进程打印 `TK_OK mapped=… width=…`（非 `TK_FAIL:<reason>`）；结果见 `d:\lf-pan\.spike\job_ui_spike.result.txt` |
 
@@ -123,5 +123,5 @@ Batch A 的硬性门槛（不通过则回退）：隔离加固后，内置 `calc
 ### 判定标准（总览）
 
 - b1–b7 全通过 + c 两场景均"报错回流" → 导入→启动闭环 OK。
-- d1–d4 在标准用户与管理员下窗口均弹出且隔离未泄漏 → Batch A spike gate 通过；任一账户弹不出 → **回退 Batch A**，按 `P1-3-EXECUTION-ISOLATION-PLAN.md` 将 calculator 列入豁免 / 调低 UI 限制。
+- d1–d4 在标准用户与管理员下窗口均弹出且隔离按 UI 限制位生效（DESKTOP/clipboard/HANDLES 不在限制集，仅 SYSPARAM/DISPLAY/EXITWIN 约束）→ Batch A spike gate 通过；任一账户弹不出 → **回退 Batch A**，按 `P1-3-EXECUTION-ISOLATION-PLAN.md` 将 calculator 列入豁免 / 调低 UI 限制。
 - 任一条"通过现象"未出现即判失败，记录截图/日志后上报，**不得主观放过**。
