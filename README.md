@@ -160,7 +160,7 @@ cargo test -p lingfang-desktop
 | ---------------------- | --------------------- |
 | `pnpm start`           | 后端准备 + 桌面端     |
 | `pnpm start:backend`   | 只启动后端            |
-| `pnpm dist`            | 创建桌面分发产物      |
+| `pnpm package:source`  | 源码 zip（非安装包）  |
 | `pnpm typecheck`       | 全 workspace 类型检查 |
 | `pnpm test`            | 全 workspace 测试     |
 | `pnpm plugin:create`   | 创建插件工程          |

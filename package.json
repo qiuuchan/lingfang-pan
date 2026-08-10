@@ -9,7 +9,7 @@
   "scripts": {
     "start": "pwsh -NoProfile -File tools/start.ps1",
     "start:backend": "pwsh -NoProfile -File tools/start.ps1 -SkipDesktop",
-    "dist": "pwsh -NoProfile -File tools/create-distribution.ps1",
+    "package:source": "pwsh -NoProfile -File tools/create-distribution.ps1",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",

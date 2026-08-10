@@ -1,3 +1,10 @@
+# =============================================================================
+# 警告：本脚本产出的是「全部源码 zip」，不是可安装的桌面端安装包。
+# 它只做源码归档（排除 node_modules、构建产物、日志、.env、本地数据库等），
+# 全程不执行任何构建，产物无法直接安装或运行。
+# 需要桌面端安装包请改用 `pnpm build:desktop`（Tauri 构建）。
+# 对应根脚本为 `pnpm package:source`（原名 `pnpm dist`，易被误读为安装包，已改名）。
+# =============================================================================
 param(
   [string]$OutputDir = 'release',
   [string]$PackageName = 'lingfang-platform',
@@ -6,6 +13,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+Write-Warning '本脚本仅打包源码 zip：不是安装包，也不执行构建。桌面端安装包请用 pnpm build:desktop。'
 
 $Root = Split-Path -Parent $PSScriptRoot
 $RootName = "$PackageName-$Timestamp"
