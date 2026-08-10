@@ -1,4 +1,4 @@
-import sys, os, json, time, shutil, requests, base64, random, string, mimetypes, logging, gc, traceback, io
+import sys, os, json, time, shutil, requests, base64, random, string, mimetypes, logging, gc, traceback, io, threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from PIL import Image, ImageFilter, ImageOps
@@ -162,6 +162,10 @@ DEFAULT_TIMEOUT = 3000               # 单次请求超时3000秒（上游偶发�
 DEFAULT_RETRY_COUNT = 5              # 优化：减少重试次数至5，降低无效重试
 # 单任务总超时：需 ≥ 单次超时 × 重试次数 + 退避（3000×10 + 退避≈60×10 ≈ 30600s），取 36000s（10h）留余量。
 DEFAULT_MAX_TOTAL_SECONDS = 36000
+# 单次读超时硬上限：对齐桥→relay 的 600s（plugin_llm_bridge.rs:1583）。正常链路下 bridge 在 ≤600s 内
+# 回包（成功或 502），不会触及此上限；仅当桥进程本身 accept 不回包（挂死）时才生效，把最坏卡死从
+# 3000s×重试 收敛到 600s×重试，使总超时 watchdog 能在有限时间内真正中止任务。
+READ_TIMEOUT_CAP = 600
 MAX_PREVIEW_IMAGES = 200
 MAX_TASK_HISTORY = 200
 
@@ -764,15 +768,20 @@ class LocalAPIGenerator:
     @staticmethod
     def get_size_str(size_ratio): return RATIO_STANDARD_SIZE.get(size_ratio, "1024x1024")
     @staticmethod
-    def generate(task, progress_callback=None, image_ready_callback=None, ask_continue_callback=None):
+    def generate(task, progress_callback=None, image_ready_callback=None, ask_continue_callback=None, cancel_check=None):
         try:
             if not bridge_ready():
                 raise Exception("未检测到平台桥环境变量，请在桌面客户端中运行本插件")
             max_retries = app_settings.value("retry_count", APP_CONFIG["retry_count"], type=int)
             timeout_sec = max(app_settings.value("timeout", APP_CONFIG["timeout_seconds"], type=int), DEFAULT_TIMEOUT)
+            # 读超时硬上限：防止桥挂死时单次请求卡 3000s；正常链路不受影响（bridge 在 ≤600s 内回包）。
+            read_timeout = min(timeout_sec, READ_TIMEOUT_CAP)
             tier = LocalAPIGenerator.get_tier()
             last_error = None
             for retry in range(max_retries):
+                # 用户取消 / 总超时 watchdog 触发后，立即中止重试循环（否则仅置 _running=False 仍会继续重试）。
+                if cancel_check and cancel_check():
+                    raise InterruptedError("任务被取消或总超时，已中止")
                 try:
                     if progress_callback: progress_callback(5 + retry*5)
                     image_paths = [p for p in task.images if p and os.path.exists(p)]
@@ -808,7 +817,7 @@ class LocalAPIGenerator:
                     size_str = LocalAPIGenerator.get_size_str(task.size)
                     if progress_callback: progress_callback(30)
                     # 经平台桥 /image/edit（参考图 + prompt），转发到 relay 按团队灵石计费。
-                    images_out = bridge_image_edit(prompt, image_paths, tier=tier, n=1, size=size_str, timeout=(30, timeout_sec))
+                    images_out = bridge_image_edit(prompt, image_paths, tier=tier, n=1, size=size_str, timeout=(30, read_timeout))
                     if progress_callback: progress_callback(70)
                     if not images_out:
                         if retry < max_retries-1:
@@ -847,7 +856,7 @@ class LocalAPIGenerator:
                             time.sleep(wait_time); continue
                         raise Exception("API返回成功但未提取到图片数据")
                 except requests.exceptions.Timeout:
-                    print(f"[API超时] #{task.local_id} 单次请求超时（{timeout_sec}秒），将重试")
+                    print(f"[API超时] #{task.local_id} 单次请求超时（{read_timeout}秒），将重试")
                     if retry < max_retries-1:
                         wait_time = min(60, LocalAPIGenerator.RETRY_DELAY_BASE * (2 ** retry))
                         print(f"等待 {wait_time}s 后重试")
@@ -878,8 +887,8 @@ class LocalAPIGenerator:
 
 class ImageGenerator:
     @staticmethod
-    def generate(task, progress_callback=None, image_ready_callback=None, ask_continue_callback=None):
-        return LocalAPIGenerator.generate(task, progress_callback, image_ready_callback, ask_continue_callback)
+    def generate(task, progress_callback=None, image_ready_callback=None, ask_continue_callback=None, cancel_check=None):
+        return LocalAPIGenerator.generate(task, progress_callback, image_ready_callback, ask_continue_callback, cancel_check=cancel_check)
 
 class TaskWorker(QThread):
     progress_signal = pyqtSignal(int, int)
@@ -888,35 +897,45 @@ class TaskWorker(QThread):
     ask_continue_signal = pyqtSignal(int)
     def __init__(self, task):
         super().__init__()
-        self.task = task; self.start_time = None; self.total_timeout_timer = None; self._running = True
+        self.task = task; self.start_time = None; self._watchdog = None; self._running = True
     def run(self):
         try:
             self.start_time = time.time()
             max_total = app_settings.value("max_total", APP_CONFIG["max_total_seconds"], type=int)
-            self.total_timeout_timer = QTimer(); self.total_timeout_timer.setSingleShot(True)
-            self.total_timeout_timer.timeout.connect(self.on_total_timeout)
-            self.total_timeout_timer.start(max_total * 1000)
+            # 总超时 watchdog：用 threading.Timer 而非 QTimer。原实现用 QTimer，但 QThread.run()
+            # 未调用 self.exec()、无事件循环，QTimer 永不触发——on_total_timeout 从不执行，卡死任务
+            # 无任何中止手段（已坐实）。threading.Timer 在独立 OS 线程触发，不受 Qt 事件循环影响。
+            self._watchdog = threading.Timer(max(1, max_total), self.on_total_timeout)
+            self._watchdog.daemon = True
+            self._watchdog.start()
             def on_progress(p):
                 if self._running: self.progress_signal.emit(self.task.local_id, p)
             def on_image_ready(path):
                 if self._running: self.image_ready_signal.emit(path)
-            outputs = ImageGenerator.generate(self.task, on_progress, on_image_ready)
+            # cancel_check 让重试循环在用户取消 / 总超时后能真正中止（仅置 _running=False 仍会继续重试）。
+            outputs = ImageGenerator.generate(self.task, on_progress, on_image_ready,
+                                              cancel_check=lambda: not self._running)
             if self._running:
-                self.total_timeout_timer.stop()
+                self._stop_watchdog()
                 elapsed = time.time() - self.start_time
                 self.finished_signal.emit(self.task.local_id, outputs, "", elapsed)
         except Exception as e:
             if self._running:
-                self.total_timeout_timer.stop()
+                self._stop_watchdog()
                 elapsed = time.time() - self.start_time
                 self.finished_signal.emit(self.task.local_id, [], str(e), elapsed)
     def on_total_timeout(self):
-        if self._running: self.ask_continue_signal.emit(self.task.local_id)
+        # 总超时：强制中止（不再弹"是否继续"——原弹窗因 QTimer bug 从未出现，且对卡死无济于事）。
+        # 置 _running=False 后，重试循环在下一轮顶部 cancel_check 处抛出 InterruptedError 结束任务。
+        self._running = False
+    def _stop_watchdog(self):
+        if self._watchdog is not None:
+            self._watchdog.cancel()
     def set_user_continue(self, cont):
         if not cont: self._running = False
     def stop(self):
         self._running = False
-        if self.total_timeout_timer and self.total_timeout_timer.isActive(): self.total_timeout_timer.stop()
+        self._stop_watchdog()
         self.quit(); self.wait(1000)
 
 class TaskItem:
