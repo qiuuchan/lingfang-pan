@@ -165,6 +165,8 @@ async function bootstrap() {
     process.env.HTTP_REQUEST_TIMEOUT_MS ?? 30 * 60 * 1000
   );
 
+  app.enableShutdownHooks();
+
   await app.listen(port, '0.0.0.0');
 }
 
