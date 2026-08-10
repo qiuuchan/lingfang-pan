@@ -111,19 +111,24 @@ export function initAuthToken(): string | null {
 
 // C1：把 token 写入 Rust 侧（webview 之外的宿主文件）。网页预览环境无 Tauri 命令 → 静默跳过。
 // 竞态修复：登录期间 setAuthToken(A) → setAuthToken(B) 会并发发两次 invoke，若 A 的写比 B 慢，
-// 磁盘上会残留旧令牌（重启后恢复回 A）。用序列号 + 串联执行保证磁盘永远收敛到「最后一次设置」。
+// 磁盘上会残留旧令牌（重启后恢复回 A）。用「请求序号 + 串联执行」保证磁盘永远收敛到最后一次设置：
+// - 每次写都排在上一写的 Promise 之后执行，天然按请求顺序落盘；
+// - 排到自己时若已被更新的请求取代（seq < persistSeq）则跳过本次写——最新请求自己会写最新值，
+//   不会出现旧值后落地，也避免了递归补写造成的永动 Promise 链。
 let persistSeq = 0;
+let persistChain: Promise<void> = Promise.resolve();
 function persistAuthTokenToHost(token: string | null): Promise<void> {
   const seq = ++persistSeq;
   const run = (async () => {
+    await persistChain;
+    if (seq < persistSeq) return;
     try {
       await tauriInvoke<void>('persist_auth_token', { token });
     } catch {
       /* 非桌面环境或旧壳：忽略 */
     }
-    // 写期间又来了更新的请求：补写最新内存值，防止旧值后落地
-    if (seq < persistSeq) return persistAuthTokenToHost(authToken);
   })();
+  persistChain = run;
   return run;
 }
 
