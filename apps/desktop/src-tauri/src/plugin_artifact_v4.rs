@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -153,12 +153,11 @@ pub(crate) fn collect_workspace_source_files(
     Ok(files)
 }
 
-pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path).map_err(|error| format!("读取制品失败：{error}"))?;
+fn sha256_reader<R: Read>(reader: &mut R) -> Result<String, String> {
     let mut hash = Sha256::new();
     let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
-        let read = file
+        let read = reader
             .read(&mut buffer)
             .map_err(|error| format!("读取制品失败：{error}"))?;
         if read == 0 {
@@ -167,6 +166,18 @@ pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
         hash.update(&buffer[..read]);
     }
     Ok(format!("{:x}", hash.finalize()))
+}
+
+pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = open_artifact(path)?;
+    sha256_reader(&mut file)
+}
+
+/// 打开制品并返回句柄。需要「先校验后解压」的调用方必须复用同一个句柄
+/// （见 `inspect_artifact_handle` / `extract_artifact_handle`），否则两次按路径
+/// 重新打开会留下 TOCTOU 窗口。
+pub(crate) fn open_artifact(path: &Path) -> Result<File, String> {
+    File::open(path).map_err(|error| format!("读取制品失败：{error}"))
 }
 
 pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
@@ -270,14 +281,25 @@ fn validate_zip_path(name: &str) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String> {
-    let size_bytes = fs::metadata(path)
+    let mut file = open_artifact(path)?;
+    inspect_artifact_handle(&mut file)
+}
+
+/// 在已打开的句柄上完成全部校验与摘要计算。校验读到的字节与后续解压读到的字节
+/// 来自同一个文件对象，因此即便磁盘上的路径在两步之间被替换，也不会解压出
+/// 未经校验的内容（P1-10）。
+pub(crate) fn inspect_artifact_handle(file: &mut File) -> Result<InspectedArtifact, String> {
+    let size_bytes = file
+        .metadata()
         .map_err(|error| format!("读取制品失败：{error}"))?
         .len();
     if size_bytes == 0 || size_bytes > MAX_ARCHIVE_BYTES {
         return Err("插件压缩包大小超限".to_string());
     }
-    let file = File::open(path).map_err(|error| format!("读取制品失败：{error}"))?;
-    let mut zip = ZipArchive::new(file).map_err(|error| format!("无效的 ZIP 制品：{error}"))?;
+    file.rewind()
+        .map_err(|error| format!("读取制品失败：{error}"))?;
+    let mut zip =
+        ZipArchive::new(&mut *file).map_err(|error| format!("无效的 ZIP 制品：{error}"))?;
     if zip.is_empty() || zip.len() > MAX_FILES {
         return Err("插件文件数量超限".to_string());
     }
@@ -377,8 +399,12 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String>
     if !seen.contains(entry) {
         return Err(format!("manifest.entry 指向的文件不存在：{entry}"));
     }
+    drop(zip);
+    file.rewind()
+        .map_err(|error| format!("读取制品失败：{error}"))?;
+    let sha256 = sha256_reader(file)?;
     Ok(InspectedArtifact {
-        sha256: sha256_file(path)?,
+        sha256,
         size_bytes,
         uncompressed_size_bytes: total,
         manifest,
@@ -386,18 +412,23 @@ pub(crate) fn inspect_artifact(path: &Path) -> Result<InspectedArtifact, String>
     })
 }
 
-pub(crate) fn extract_artifact(
-    path: &Path,
+/// 校验并解压同一个已打开的句柄。调用方若在此之前已经 `inspect_artifact_handle`
+/// 过同一句柄，这里会在**同一文件对象**上重新校验一次，从而保证落盘的内容
+/// 与通过校验的内容严格一致（P1-10）。
+pub(crate) fn extract_artifact_handle(
+    file: &mut File,
     destination: &Path,
 ) -> Result<InspectedArtifact, String> {
-    let inspected = inspect_artifact(path)?;
+    let inspected = inspect_artifact_handle(file)?;
     if destination.exists() {
         return Err("解压目标已存在".to_string());
     }
     fs::create_dir_all(destination).map_err(|error| format!("创建解压目录失败：{error}"))?;
     let result = (|| {
-        let file = File::open(path).map_err(|error| format!("读取制品失败：{error}"))?;
-        let mut zip = ZipArchive::new(file).map_err(|error| format!("无效的 ZIP 制品：{error}"))?;
+        file.rewind()
+            .map_err(|error| format!("读取制品失败：{error}"))?;
+        let mut zip =
+            ZipArchive::new(&mut *file).map_err(|error| format!("无效的 ZIP 制品：{error}"))?;
         let mut total = 0_u64;
         for index in 0..zip.len() {
             let mut entry = zip
@@ -602,8 +633,36 @@ mod tests {
 
         assert!(inspect_artifact(&artifact).is_err());
         let destination = root.join("out");
-        assert!(extract_artifact(&artifact, &destination).is_err());
+        let mut handle = open_artifact(&artifact).unwrap();
+        assert!(extract_artifact_handle(&mut handle, &destination).is_err());
         assert!(!destination.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// P1-10：校验通过后把磁盘上的路径整个换掉，解压仍必须落出被校验过的那份内容。
+    #[test]
+    fn extraction_follows_inspected_handle_not_swapped_path() {
+        let root = temp("toctou-swap");
+        fs::create_dir_all(&root).unwrap();
+        let artifact = root.join("plugin.lfplugin");
+        write_test_zip(&artifact, &[("payload.txt", b"trusted")]);
+
+        let mut handle = open_artifact(&artifact).unwrap();
+        let inspected = inspect_artifact_handle(&mut handle).unwrap();
+
+        // 攻击者在校验之后原子替换掉路径（rename 走的是新的文件对象）。
+        let stashed = root.join("stashed.lfplugin");
+        fs::rename(&artifact, &stashed).unwrap();
+        write_test_zip(&artifact, &[("payload.txt", b"attacker")]);
+        assert_ne!(sha256_file(&artifact).unwrap(), inspected.sha256);
+
+        let destination = root.join("out");
+        let extracted = extract_artifact_handle(&mut handle, &destination).unwrap();
+        assert_eq!(extracted.sha256, inspected.sha256);
+        assert_eq!(
+            fs::read(destination.join("payload.txt")).unwrap(),
+            b"trusted"
+        );
         let _ = fs::remove_dir_all(root);
     }
 

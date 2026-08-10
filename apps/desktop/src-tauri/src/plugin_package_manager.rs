@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -12,8 +12,9 @@ use uuid::Uuid;
 
 use crate::builtin_plugin_index::parse_builtin_index;
 use crate::plugin_artifact_v4::{
-    collect_workspace_source_files, extract_artifact, inspect_artifact, package_workspace,
-    sha256_bytes, sha256_file, InspectedArtifact,
+    collect_workspace_source_files, extract_artifact_handle, inspect_artifact,
+    inspect_artifact_handle, open_artifact, package_workspace, sha256_bytes, sha256_file,
+    InspectedArtifact,
 };
 use crate::plugin_store::{read_json, write_json, PluginStore};
 
@@ -1070,7 +1071,11 @@ impl PluginPackageManager {
     pub(crate) fn install(&self, input: InstallArtifactInput) -> Result<LocalInstallation, String> {
         let _guard = lock_or_recover(&self.file_lock);
         let artifact_path = PathBuf::from(&input.artifact_path);
-        let inspected = inspect_artifact(&artifact_path)?;
+        // P1-10：制品只打开一次，校验、解压、缓存全部复用同一个文件对象。
+        // 若按路径二次打开，攻击者可在校验通过后替换掉磁盘上的文件，
+        // 使落到 staging 的内容与通过校验的内容不是同一份。
+        let mut artifact_file = open_artifact(&artifact_path)?;
+        let inspected = inspect_artifact_handle(&mut artifact_file)?;
         if let Some(expected) = input.expected_sha256.as_deref() {
             if !expected.eq_ignore_ascii_case(&inspected.sha256) {
                 self.audit(
@@ -1134,7 +1139,7 @@ impl PluginPackageManager {
         }
         let staging = self.staging_root().join(Uuid::new_v4().to_string());
         let staging_package = staging.join("package");
-        if let Err(error) = extract_artifact(&artifact_path, &staging_package) {
+        if let Err(error) = extract_artifact_handle(&mut artifact_file, &staging_package) {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
         }
@@ -1192,13 +1197,28 @@ impl PluginPackageManager {
             .cache_root()
             .join(format!("{}.lfplugin", inspected.sha256));
         if !cache_path.exists() {
-            if let Err(error) = fs::copy(&artifact_path, &cache_path) {
+            // 缓存文件名就是 inspected.sha256，必须由同一个句柄写出，
+            // 否则被替换的磁盘内容会以错误的 sha 名字进入缓存。
+            let cache_result = (|| -> Result<(), String> {
+                artifact_file
+                    .rewind()
+                    .map_err(|error| format!("缓存插件制品失败：{error}"))?;
+                let mut cache_file = File::create(&cache_path)
+                    .map_err(|error| format!("缓存插件制品失败：{error}"))?;
+                std::io::copy(&mut artifact_file, &mut cache_file)
+                    .map_err(|error| format!("缓存插件制品失败：{error}"))?;
+                cache_file
+                    .sync_all()
+                    .map_err(|error| format!("缓存插件制品失败：{error}"))
+            })();
+            if let Err(error) = cache_result {
+                let _ = fs::remove_file(&cache_path);
                 remove_release_directory(&final_package.to_string_lossy());
                 remove_release_environment_path(&installation_root, &release_id);
                 if existing_index.is_none() {
                     let _ = fs::remove_dir_all(&installation_root);
                 }
-                return Err(format!("缓存插件制品失败：{error}"));
+                return Err(error);
             }
         }
         let now = Utc::now().to_rfc3339();
@@ -1698,7 +1718,9 @@ impl PluginPackageManager {
         artifact_path: &Path,
         provenance: ReleaseProvenance,
     ) -> Result<DraftWorkspace, String> {
-        let inspected = inspect_artifact(artifact_path)?;
+        // P1-10：与 install 同理，校验与解压共用同一个句柄。
+        let mut artifact_file = open_artifact(artifact_path)?;
+        let inspected = inspect_artifact_handle(&mut artifact_file)?;
         let manifest_id = inspected
             .manifest
             .get("id")
@@ -1722,7 +1744,7 @@ impl PluginPackageManager {
         let _guard = lock_or_recover(&self.file_lock);
         let workspace_id = Uuid::new_v4().to_string();
         let path = self.workspaces_root().join(&workspace_id);
-        extract_artifact(artifact_path, &path)?;
+        extract_artifact_handle(&mut artifact_file, &path)?;
         let now = Utc::now().to_rfc3339();
         let workspace = DraftWorkspace {
             workspace_id,
