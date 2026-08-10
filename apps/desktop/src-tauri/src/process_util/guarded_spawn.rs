@@ -11,8 +11,10 @@
 //! - `CREATE_NO_WINDOW`：插件进程不再能弹控制台做 UI 欺骗（R12）。
 //!
 //! **本模块不负责**（留给后续 Step，见 P1-3 计划）：
-//! - Step 2 降权（受限令牌 / 低完整性）、Step 3 桥 token 改道、Step 4 防 manifest 自我提权、
-//!   Step 5 Unix/macOS 补齐（当前 Unix 侧仅 `setsid`，无 PDEATHSIG）。
+//! - Step 2 降权（受限令牌 / 低完整性）、Step 3 桥 token 改道、Step 4 防 manifest 自我提权。
+//! - Unix/macOS 补齐（Step 5）**已落地**：`pre_exec` 在 `setsid()` 之后补 Linux
+//!   `PR_SET_PDEATHSIG(SIGKILL)` + 跨平台 `setrlimit`（RLIMIT_NPROC / RLIMIT_AS），
+//!   镜像 Windows Job Object 的进程数/内存配额；macOS 的 PDEATHSIG 等价（kqueue 看门狗）留作 follow-up。
 //!
 //! **不走本模块的通道**（宿主自操作，不执行任何插件代码，故不需要围栏）：
 //! `plugin_package_manager/helpers.rs` 的 `mklink`、`plugin_runner.rs` 的 `rmdir` 兜底删目录、
@@ -248,10 +250,11 @@ impl GuardedCommand {
         #[cfg(unix)]
         {
             // Unix：setsid 做进程组分离（stop 时按进程组 kill）。
-            // 注意：这里**没有** PR_SET_PDEATHSIG——宿主被强杀时插件进程仍会残留，属 Step 5 待补。
             use std::os::unix::process::CommandExt;
+            // policy 移动进 pre_exec 闭包：Step 5 用它推导 setrlimit 配额（镜像 Windows Job 配额）。
+            let policy = self.policy;
             unsafe {
-                command.pre_exec(|| {
+                command.pre_exec(move || {
                     // setsid 失败时子进程会留在宿主进程组/session 里——stop 时 kill -- -{pid}
                     // 打不到整棵进程树，隔离承诺被悄悄破坏。pre_exec 在 fork 之后、exec 之前
                     // 于子进程内运行，返回 Err 能使 spawn() 整体失败，而不是放行未隔离的进程。
@@ -259,6 +262,11 @@ impl GuardedCommand {
                     // 自 fork 的进程组与父进程相同，正常路径不会撞上组长身份。
                     if super::tree::libc_setsid() == -1 {
                         return Err(std::io::Error::last_os_error());
+                    }
+                    // Step 5（P1-3 / M-2）：宿主被强杀/崩溃时子进程应随之退出，而非残留成孤儿
+                    // 继续跑第三方代码。返回 Err 同样使 spawn() 整体失败。
+                    if let Err(error) = apply_unix_isolation(&policy) {
+                        return Err(error);
                     }
                     Ok(())
                 });
@@ -400,6 +408,85 @@ fn resume_process_threads(pid: u32) -> Result<u32, String> {
         ));
     }
     Ok(resumed)
+}
+
+// ── Unix 沙箱补齐（P1-3 Step 5）────────────────────────────────────
+//
+// Windows 侧用 Job Object 同时解决「围栏 + 资源配额 + UI 限制」；Unix 没有 Job Object，
+// 这里在 `pre_exec` 里分两步对齐：
+//   1. `setrlimit`（全 Unix 通用）：镜像 Job 的进程数 / 单进程内存上限，挡 fork bomb 与内存耗尽。
+//   2. `PR_SET_PDEATHSIG(SIGKILL)`（仅 Linux）：宿主进程死亡时子进程收 SIGKILL，
+//      消除「宿主被强杀后插件残留成孤儿继续跑第三方代码」这一原 R5 缺口。
+// macOS/BSD 无 `prctl(PR_SET_PDEATHSIG)`，其等价物（kqueue 监听父进程 EXIT 的看门狗线程）
+// 需常驻子进程内、超出 pre_exec 范畴，留作后续独立任务；macOS 上至少先上 setrlimit 配额。
+//
+// 注意：本段 `#[cfg(unix)]`，在 Windows 构建中不参与编译——逻辑正确性需在 Linux/macOS
+// 构建与运行时复核（本机 Windows CI 无法覆盖）。
+
+#[cfg(unix)]
+fn apply_unix_isolation(policy: &SandboxPolicy) -> Result<(), std::io::Error> {
+    apply_rlimits(policy)?;
+    #[cfg(target_os = "linux")]
+    {
+        extern "C" {
+            fn prctl(option: i32, arg2: i32, arg3: i32, arg4: i32, arg5: i32) -> i32;
+        }
+        const PR_SET_PDEATHSIG: i32 = 1;
+        const SIGKILL: i32 = 9;
+        // SAFETY：pre_exec 在 fork 之后的子进程内运行，此调用仅影响本子进程；
+        // PR_SET_PDEATHSIG 是进程级一次性设置，参数均为字面量常量。
+        if unsafe { prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0) } == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn apply_rlimits(policy: &SandboxPolicy) -> Result<(), std::io::Error> {
+    extern "C" {
+        fn setrlimit(resource: i32, rlim: *const RLimit) -> i32;
+    }
+    // 64 位 Linux（默认 _FILE_OFFSET_BITS=64）与 macOS 的 rlim_t 均为 u64，结构体布局一致。
+    #[repr(C)]
+    struct RLimit {
+        rlim_cur: u64,
+        rlim_max: u64,
+    }
+    // 资源索引在不同 Unix 平台不一致，分开设避免错配常量：
+    //   Linux:  RLIMIT_AS=9,    RLIMIT_NPROC=6
+    //   macOS:  RLIMIT_AS=5,    RLIMIT_NPROC=7
+    // RLIMIT_CPU 两平台均为 0，但它是「CPU 秒数」硬上限，与 Windows 的 CPU 率(%)语义不同，
+    // 且易误杀长时间跑的 pandas 类插件，故此处不设置，留给后续独立评估。
+    #[cfg(target_os = "linux")]
+    const RLIMIT_AS: i32 = 9;
+    #[cfg(target_os = "linux")]
+    const RLIMIT_NPROC: i32 = 6;
+    #[cfg(not(target_os = "linux"))]
+    const RLIMIT_AS: i32 = 5;
+    #[cfg(not(target_os = "linux"))]
+    const RLIMIT_NPROC: i32 = 7;
+
+    if policy.active_process_limit > 0 {
+        let limit = RLimit {
+            rlim_cur: policy.active_process_limit as u64,
+            rlim_max: policy.active_process_limit as u64,
+        };
+        // SAFETY：rlimit 指向栈上有效结构体，resource 为本进程合法索引。
+        if unsafe { setrlimit(RLIMIT_NPROC, &limit) } == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    if policy.process_memory_limit > 0 {
+        let limit = RLimit {
+            rlim_cur: policy.process_memory_limit,
+            rlim_max: policy.process_memory_limit,
+        };
+        if unsafe { setrlimit(RLIMIT_AS, &limit) } == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 // ── 单元测试 ──────────────────────────────────────────────────────────

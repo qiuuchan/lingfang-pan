@@ -12,10 +12,14 @@
 //!   仍处于 `CREATE_SUSPENDED` 挂起态 —— 入 Job 之前它一条用户指令都没执行，无竞态窗口。
 //! - `Drop` 关闭 Job 句柄 → 触发 KILL_ON_JOB_CLOSE → 整棵进程树被杀。
 //!
-//! Unix：**当前没有任何沙箱**。`guarded_spawn` 只在 pre_exec 里做 `setsid()` 进程组分离，
-//! 用于 stop 时整组 kill；宿主被强杀时插件进程仍会残留。
-//! （历史注释曾声称此处实现了 `prctl(PR_SET_PDEATHSIG, SIGKILL)`，实际从未实现，已订正。
-//! 真正补齐见 P1-3 计划 Step 5：PDEATHSIG + setrlimit + cgroup v2。）
+//! Unix：**Job Object 是 Windows 专有，Unix 侧无等价物**，故 `SandboxHandle` 在 Unix 是空 stub
+//! （`Drop` / `assign_process` 都是 no-op）。进程级隔离改在 `guarded_spawn` 的 `pre_exec` 里做
+//! （P1-3 Step 5 已落地）：
+//! - `setsid()` 进程组分离 → stop 时整组 kill；
+//! - Linux `PR_SET_PDEATHSIG(SIGKILL)` → 宿主死亡时子进程随之退出，消除孤儿残留（原 R5）；
+//! - 跨平台 `setrlimit(RLIMIT_NPROC / RLIMIT_AS)` → 镜像 Windows Job 的进程数/内存配额。
+//! （历史注释曾声称实现了 `prctl(PR_SET_PDEATHSIG, SIGKILL)`，实际从未实现，已订正并真正补齐；
+//! macOS 的 PDEATHSIG 等价即 kqueue 看门狗留作 follow-up，cgroup v2 资源隔离亦留后续独立任务。）
 //!
 //! 与 process_util/tree.rs 的协作：
 //! - tree.rs 的 `kill_child_tree` 仍用于主动 stop（先杀进程树再 drop SandboxHandle）。
