@@ -791,7 +791,10 @@ model MarketplaceListingReleaseActivation {
   pointerRevision Int
   createdAt       DateTime @default(now())
 
-  @@unique([listingId, pointerRevision])
+  // NEW-2：迁移链里这条唯一索引写的是 65 字符的全名，被 Postgres 静默截断到 63 字符，
+  // 尾巴上的 "ey" 被削掉了；Prisma 自己的截断算法则是砍中段、保住 "_key" 后缀，两者对不上。
+  // 显式 map 成库里真实存在的名字，让 schema 向迁移链看齐（不必新增改名迁移）。
+  @@unique([listingId, pointerRevision], map: "MarketplaceListingReleaseActivation_listingId_pointerRevision_k")
   @@index([listingId, activatedAt])
   @@index([releaseId, activatedAt])
 }
@@ -809,7 +812,8 @@ model MarketplaceListingEligibilityEpoch {
   gateSnapshotDigest String
   createdAt          DateTime                   @default(now())
 
-  @@unique([listingId, kind, generation])
+  // NEW-2：同上，迁移链的 64 字符全名被截断成以 "_ke" 结尾，与 Prisma 的截断结果不一致。
+  @@unique([listingId, kind, generation], map: "MarketplaceListingEligibilityEpoch_listingId_kind_generation_ke")
   @@index([listingId, kind, startedAt])
   @@index([releaseId, kind, startedAt])
 }
@@ -918,8 +922,10 @@ model MarketplaceQualitySnapshot {
   autoQualified             Boolean
   reasons                   Json
 
-  @@unique([packageId, releaseId, currentReleaseActivatedAt, eligibilityRevision, policyVersion, factWatermark, computationRevision])
-  @@index([packageId, releaseId, factWatermark, computationRevision])
+  // NEW-2：迁移链给这条 7 列唯一索引起的是手写短名 identity_key（并非 Prisma 默认命名）；
+  // 下面那条普通索引的全名 84 字符，被 Postgres 截断成以 "_co" 结尾。均显式 map 成库里的真名。
+  @@unique([packageId, releaseId, currentReleaseActivatedAt, eligibilityRevision, policyVersion, factWatermark, computationRevision], map: "MarketplaceQualitySnapshot_identity_key")
+  @@index([packageId, releaseId, factWatermark, computationRevision], map: "MarketplaceQualitySnapshot_packageId_releaseId_factWatermark_co")
   @@index([autoQualified, computedAt])
 }
 
@@ -1700,12 +1706,15 @@ model PluginSharedValueArtifact {
   jsonPointer         String
   executionKind       ActionInvocationKind @default(STANDARD)
   namespace            PluginSharedNamespace @relation(fields: [namespaceId], references: [id], onDelete: Cascade)
-  value               PluginSharedValue @relation(fields: [namespaceId, key], references: [namespaceId, key], onDelete: Cascade)
-  artifact            RuntimeArtifact @relation(fields: [artifactId, executionKind], references: [id, executionKind], onDelete: Cascade, onUpdate: Restrict)
+  // NEW-2：这两条外键在迁移链里用的是手写短名（value_fkey / artifact_fkey），
+  // 不是 Prisma 默认的「列名拼接」命名，显式 map 成库里的真名。
+  value               PluginSharedValue @relation(fields: [namespaceId, key], references: [namespaceId, key], onDelete: Cascade, map: "PluginSharedValueArtifact_value_fkey")
+  artifact            RuntimeArtifact @relation(fields: [artifactId, executionKind], references: [id, executionKind], onDelete: Cascade, onUpdate: Restrict, map: "PluginSharedValueArtifact_artifact_fkey")
 
-  @@unique([namespaceId, namespaceGeneration, key, valueRevision, artifactId, jsonPointer])
+  // NEW-2：同理，这两条索引在迁移链里也是手写短名（scope_key / value_scope_idx）。
+  @@unique([namespaceId, namespaceGeneration, key, valueRevision, artifactId, jsonPointer], map: "PluginSharedValueArtifact_scope_key")
   @@index([artifactId, executionKind])
-  @@index([namespaceId, namespaceGeneration, key, valueRevision])
+  @@index([namespaceId, namespaceGeneration, key, valueRevision], map: "PluginSharedValueArtifact_value_scope_idx")
 }
 
 model SharedStateOutbox {
@@ -1811,7 +1820,8 @@ model WorkflowRun {
   team                  Team                    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   principal             User?                   @relation("WorkflowRunPrincipal", fields: [principalUserId], references: [id], onDelete: SetNull)
   workflowRelease       WorkflowRelease         @relation(fields: [workflowReleaseId], references: [pluginReleaseId], onDelete: Restrict)
-  desktopExecutorSession DesktopExecutorSession? @relation(fields: [desktopExecutorSessionId, teamId, desktopInventorySha256], references: [id, teamId, inventorySha256], onDelete: Restrict)
+  // NEW-2：迁移链里这条外键用的是手写短名，Prisma 默认名（三列拼接后被截断）与之不符，显式 map。
+  desktopExecutorSession DesktopExecutorSession? @relation(fields: [desktopExecutorSessionId, teamId, desktopInventorySha256], references: [id, teamId, inventorySha256], onDelete: Restrict, map: "WorkflowRun_desktopExecutorSession_fkey")
   attempts              WorkflowStepAttempt[]
   schedule              AutomationSchedule? @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
   cloudBindings         WorkflowRunCloudBinding[]
