@@ -23,6 +23,7 @@ const INGEST_CHANNEL_LABELS: Record<PluginIngestChannel, string> = {
   DESKTOP: '桌面端',
   API: 'API',
   MIGRATION: '迁移程序',
+  ADAPT: '适配流水线',
 };
 
 export function sourceKindLabel(value: PluginSourceKind) {
