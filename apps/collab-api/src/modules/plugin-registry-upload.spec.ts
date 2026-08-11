@@ -76,6 +76,8 @@ describe('PluginRegistryService upload provenance', () => {
         create: vi.fn().mockResolvedValue(pkg),
       },
       pluginRelease: { findUnique: vi.fn().mockResolvedValue(null) },
+      // P0-8 协议版本源：未配置 → 回退默认 {user:'v1',pluginUpload:'v1'}。
+      platformSetting: { findMany: vi.fn().mockResolvedValue([]) },
       $transaction: vi.fn(async (operation: (client: typeof tx) => unknown) => operation(tx)),
     };
     const artifacts = { promote: vi.fn().mockResolvedValue(undefined), delete: vi.fn() };
@@ -94,7 +96,8 @@ describe('PluginRegistryService upload provenance', () => {
       Readable.from([Buffer.from('test-artifact')]),
       undefined,
       undefined,
-      { sourceKind: 'external_tool', sourceLabelBase64, ingestChannel: 'desktop' }
+      { sourceKind: 'external_tool', sourceLabelBase64, ingestChannel: 'desktop' },
+      'v1'
     );
 
     expect(releaseCreate).toHaveBeenCalledWith({
@@ -178,6 +181,8 @@ describe('PluginRegistryService 上传失败回滚的制品引用计数', () => 
       },
       pluginRelease: { findUnique: vi.fn().mockResolvedValue(null), count },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
+      // P0-8 协议版本源：未配置 → 回退默认 {user:'v1',pluginUpload:'v1'}。
+      platformSetting: { findMany: vi.fn().mockResolvedValue([]) },
       $transaction: vi.fn().mockRejectedValue(transactionError),
     };
     const artifacts = {
@@ -193,7 +198,14 @@ describe('PluginRegistryService 上传失败回滚的制品引用计数', () => 
       artifacts as never
     );
     const publish = () =>
-      registry.publishTeamRelease(userId, Readable.from([Buffer.from('rollback-artifact')]));
+      registry.publishTeamRelease(
+        userId,
+        Readable.from([Buffer.from('rollback-artifact')]),
+        undefined,
+        undefined,
+        {},
+        'v1'
+      );
     return { prisma, artifacts, publish };
   };
 

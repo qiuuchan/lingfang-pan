@@ -381,6 +381,9 @@ pub(crate) struct PublishWorkspaceInput {
     /// 适配报告暂存 id（桌面端「本地插件目录」模式跑完适配流水线后暂存换得）。
     #[serde(default)]
     pub adaptation_report_id: Option<String>,
+    /// P0-8 插件上传协议版本：客户端携带与服务端 agreementVersions.pluginUpload 一致的版本。
+    #[serde(default)]
+    pub agreement_version: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -398,6 +401,9 @@ pub(crate) struct PublishLocalArtifactInput {
     /// 发布时只带 id）。None = 未跑适配流水线，服务端按 NOT_RUN 处理。
     #[serde(default)]
     pub adaptation_report_id: Option<String>,
+    /// P0-8 插件上传协议版本：客户端携带与服务端 agreementVersions.pluginUpload 一致的版本。
+    #[serde(default)]
+    pub agreement_version: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

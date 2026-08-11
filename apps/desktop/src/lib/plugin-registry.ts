@@ -657,7 +657,11 @@ export async function importLocalArtifact(artifactPath: string): Promise<Install
 
 export async function publishLocalArtifact(
   artifactPath: string,
-  options: Partial<PluginProvenance> & { packageId?: string; adaptationReportId?: string } = {},
+  options: Partial<PluginProvenance> & {
+    packageId?: string;
+    adaptationReportId?: string;
+    agreementVersion?: string;
+  } = {},
   onProgress?: (progress: TransferProgress) => void
 ): Promise<RegistryPublishResult> {
   const { base, token } = connection();
@@ -671,6 +675,7 @@ export async function publishLocalArtifact(
       sourceKind: provenance.sourceKind,
       sourceLabel: provenance.sourceLabel,
       adaptationReportId: options.adaptationReportId || undefined,
+      agreementVersion: options.agreementVersion || undefined,
     },
     onEvent: progressChannel(onProgress),
   });
@@ -788,6 +793,8 @@ export type PublishWorkspaceOptions = Partial<PluginProvenance> & {
   packageId?: string;
   /** 适配报告暂存 id（桌面端「本地插件目录」模式跑完适配流水线后暂存换得）。 */
   adaptationReportId?: string;
+  /** P0-8 插件上传协议版本：与服务端 agreementVersions.pluginUpload 一致。 */
+  agreementVersion?: string;
 };
 
 export function publishDraftWorkspace(
@@ -834,6 +841,7 @@ export async function publishDraftWorkspace(
       sourceKind: provenance.sourceKind,
       sourceLabel: provenance.sourceLabel,
       adaptationReportId: options.adaptationReportId || undefined,
+      agreementVersion: options.agreementVersion || undefined,
     },
     onEvent: progressChannel(onProgress),
   });
