@@ -39,6 +39,13 @@ enum Phase {
     Failed(String),
 }
 
+/// P0-8 安装器协议文档：点击底部链接弹出的真实文本来源。
+#[derive(Clone, Copy)]
+enum AgreementDoc {
+    UserAgreement,
+    PrivacyPolicy,
+}
+
 struct InstallerApp {
     install_dir: String,
     version: String,
@@ -46,6 +53,10 @@ struct InstallerApp {
     custom_mode: bool,
     create_desktop: bool,
     agreed: bool,
+    /// P0-8 隐私政策勾选（与用户协议勾选独立，二者皆满才可安装）。
+    agreed_privacy: bool,
+    /// P0-8 当前弹出的协议文档（None=不弹）。
+    show_doc: Option<AgreementDoc>,
     logo: Option<egui::TextureHandle>,
     rx: Option<mpsc::Receiver<Progress>>,
     /// 已应用圆角时的窗口尺寸（用于切换简洁/自定义模式 resize 后重设区域）。
@@ -66,6 +77,8 @@ pub fn run_interactive(target: Option<&str>) -> Result<()> {
         custom_mode: false,
         create_desktop: true,
         agreed: false,
+        agreed_privacy: false,
+        show_doc: None,
         logo: None,
         rx: None,
         rounded_size: None,
@@ -166,6 +179,36 @@ impl eframe::App for InstallerApp {
                     self.view_failed(ui, ctx, &e);
                 }
             });
+
+        // P0-8 协议文本弹窗：点击底部《用户协议》/《隐私政策》链接后展示真实内置文本（机制真实可用）。
+        if let Some(doc) = self.show_doc {
+            let (title, body) = match doc {
+                AgreementDoc::UserAgreement => (theme::USER_AGREEMENT_TITLE, theme::USER_AGREEMENT_TEXT),
+                AgreementDoc::PrivacyPolicy => (theme::PRIVACY_POLICY_TITLE, theme::PRIVACY_POLICY_TEXT),
+            };
+            let mut open = true;
+            egui::Window::new(title)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(ctx, |ui| {
+                    ui.add_space(4.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(320.0)
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new(body).size(13.0).color(theme::TEXT));
+                        });
+                    ui.add_space(12.0);
+                    ui.vertical_centered(|ui| {
+                        if theme::primary_button(ui, "我已阅读", 200.0, true) {
+                            open = false;
+                        }
+                    });
+                });
+            if !open {
+                self.show_doc = None;
+            }
+        }
     }
 }
 
@@ -189,7 +232,7 @@ impl InstallerApp {
 
         ui.add_space(40.0);
         ui.vertical_centered(|ui| {
-            if theme::primary_button(ui, "立即安装", 300.0, self.agreed) {
+            if theme::primary_button(ui, "立即安装", 300.0, self.can_install()) {
                 self.begin_install();
             }
         });
@@ -255,7 +298,7 @@ impl InstallerApp {
 
         ui.add_space(24.0);
         ui.vertical_centered(|ui| {
-            if theme::primary_button(ui, "立即安装", 300.0, self.agreed) {
+            if theme::primary_button(ui, "立即安装", 300.0, self.can_install()) {
                 self.begin_install();
             }
             ui.add_space(12.0);
@@ -280,7 +323,13 @@ impl InstallerApp {
                     .size(13.0)
                     .color(theme::TEXT),
             );
-            let _ = theme::link(ui, "《用户协议》");
+            if theme::link(ui, "《用户协议》") {
+                self.show_doc = Some(AgreementDoc::UserAgreement);
+            }
+            ui.label(egui::RichText::new("与").size(13.0).color(theme::TEXT));
+            if theme::link(ui, "《隐私政策》") {
+                self.show_doc = Some(AgreementDoc::PrivacyPolicy);
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(18.0);
                 let label = if simple_now {
@@ -299,6 +348,16 @@ impl InstallerApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(size.into()));
                 }
             });
+        });
+        // P0-8 隐私政策独立勾选：与用户协议勾选共同决定安装按钮可用性。
+        ui.horizontal(|ui| {
+            ui.add_space(18.0);
+            ui.checkbox(&mut self.agreed_privacy, "");
+            ui.label(
+                egui::RichText::new("我已阅读并同意上述《隐私政策》")
+                    .size(13.0)
+                    .color(theme::TEXT),
+            );
         });
         ui.add_space(14.0);
     }
@@ -431,7 +490,16 @@ impl InstallerApp {
     ///
     /// 按安装目录路径匹配，覆盖主程序 + runtimes/python.exe / node.exe 等被拉起的子进程——
     /// 仅杀主程序会留下占用 python.exe 的孤儿进程，导致自解压覆盖时 os error 32。
+    /// P0-8 安装许可：用户协议与隐私政策两项勾选皆满才允许安装（fail-closed，任一未勾选则按钮禁用）。
+    fn can_install(&self) -> bool {
+        self.agreed && self.agreed_privacy
+    }
+
     fn begin_install(&mut self) {
+        // 防御性二次校验：即便 UI 绕过，未双勾选也不启动安装。
+        if !self.can_install() {
+            return;
+        }
         let dir = PathBuf::from(&self.install_dir);
         if platform::is_app_running(&dir) {
             self.phase = Phase::ProcessRunning;
@@ -621,4 +689,54 @@ fn do_install(
     std::thread::sleep(std::time::Duration::from_millis(200));
     let _ = tx.send(Progress::Step("安装完成！".into(), 1.0));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 构造最小可用 InstallerApp（仅用于 can_install 断言，不触发 UI/安装）。
+    fn minimal_app() -> InstallerApp {
+        InstallerApp {
+            install_dir: String::new(),
+            version: String::new(),
+            phase: Phase::Confirm,
+            custom_mode: false,
+            create_desktop: true,
+            agreed: false,
+            agreed_privacy: false,
+            show_doc: None,
+            logo: None,
+            rx: None,
+            rounded_size: None,
+            started: Instant::now(),
+        }
+    }
+
+    // P0-8 反向用例：两项协议任一未勾选 → 不允许安装（按钮禁用 + begin_install 防御性拦截）。
+    #[test]
+    fn can_install_false_when_agreements_not_both_checked() {
+        // 初始：均未勾选。
+        let app = minimal_app();
+        assert!(!app.can_install(), "双未勾选必须禁止安装");
+
+        // 仅勾选用户协议。
+        let mut a2 = minimal_app();
+        a2.agreed = true;
+        assert!(!a2.can_install(), "仅用户协议未勾选隐私政策必须禁止安装");
+
+        // 仅勾选隐私政策。
+        let mut a3 = minimal_app();
+        a3.agreed_privacy = true;
+        assert!(!a3.can_install(), "仅隐私政策未勾选用户协议必须禁止安装");
+    }
+
+    // P0-8 正向用例：两项皆勾选 → 允许安装。
+    #[test]
+    fn can_install_true_when_both_agreed() {
+        let mut app = minimal_app();
+        app.agreed = true;
+        app.agreed_privacy = true;
+        assert!(app.can_install(), "双勾选应允许安装");
+    }
 }
