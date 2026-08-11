@@ -7,6 +7,7 @@
 // AI 能力统一走平台 relay（见 docs/billing-and-relay-design.md）。本模块仅保留通用子进程工具。
 mod binary;
 mod capture;
+mod crash_report;
 mod guarded_spawn;
 mod sandbox;
 mod tree;
@@ -19,6 +20,7 @@ pub(crate) use capture::{
     run_capture_with_env, run_capture_with_env_and_cancel, run_streamed_with_env, CapturedOutput,
 };
 pub(crate) use guarded_spawn::{GuardedChild, GuardedCommand, SandboxPolicy, SandboxTier};
+pub(crate) use crash_report::{install_panic_hook, report_pending_crashes};
 pub(crate) use sandbox::SandboxHandle;
 pub(crate) use tree::kill_child_tree;
 
