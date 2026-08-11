@@ -273,6 +273,9 @@ pub(crate) async fn download_plugin_release(
             .map_err(|error| format!("刷新插件制品失败：{error}"))
     }
     .await;
+    // NEW-5：安装侧现在以 FILE_SHARE_READ 独占读方式打开制品（拒绝并发写入者），
+    // 下载写句柄若还开着会把自己的安装挡掉，必须先关闭；顺带让下面的 staging 清理能成功。
+    drop(output);
     if let Err(error) = download_result {
         let _ = fs::remove_dir_all(&staging);
         return Err(error);

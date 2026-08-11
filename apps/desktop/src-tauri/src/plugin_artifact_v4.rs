@@ -174,10 +174,48 @@ pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
 }
 
 /// 打开制品并返回句柄。需要「先校验后解压」的调用方必须复用同一个句柄
-/// （见 `inspect_artifact_handle` / `extract_artifact_handle`），否则两次按路径
+/// （见 `inspect_artifact_handle` / `extract_artifact_handle_verified`），否则两次按路径
 /// 重新打开会留下 TOCTOU 窗口。
+///
+/// NEW-5：只复用句柄还不够。Windows 上 `File::open` 默认共享模式是
+/// `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`，攻击者可以在我们持有句柄、
+/// sha 已经算完之后**原地覆写同一个文件对象**——句柄没换、路径没换，但解压读到的已经是
+/// 新内容，而缓存仍以受信 sha 命名，TOCTOU 完整闭环。这里只放行 `FILE_SHARE_READ`：
+/// 他人仍可只读打开，但拿不到写句柄，也删不掉、改不了名。
 pub(crate) fn open_artifact(path: &Path) -> Result<File, String> {
-    File::open(path).map_err(|error| format!("读取制品失败：{error}"))
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        // winnt.h：FILE_SHARE_READ
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(path)
+            .map_err(|error| describe_open_error(path, &error))
+    }
+    #[cfg(not(windows))]
+    {
+        File::open(path).map_err(|error| describe_open_error(path, &error))
+    }
+}
+
+/// 打开失败时区分「不存在」与「被其他进程占用」，否则运维只能看到一句含糊的
+/// 「读取制品失败」，无法判断是路径写错了还是有并发写入者在动这份制品。
+fn describe_open_error(path: &Path, error: &std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return format!("读取制品失败：制品不存在（{}）", path.display());
+    }
+    // Windows：32 = ERROR_SHARING_VIOLATION，33 = ERROR_LOCK_VIOLATION。
+    if matches!(error.raw_os_error(), Some(32) | Some(33)) {
+        return format!(
+            "读取制品失败：制品正被其他进程占用（{}），拒绝在可能被并发写入的状态下读取：{error}",
+            path.display()
+        );
+    }
+    format!("读取制品失败：{error}")
 }
 
 pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
@@ -476,6 +514,42 @@ pub(crate) fn extract_artifact_handle(
 }
 
 #[cfg(test)]
+thread_local! {
+    /// 仅测试可见的故障注入：把重校验摘要强行改成不匹配值。
+    /// 真实的「持有句柄期间原地覆写」在 Windows 上已被 `open_artifact` 的
+    /// `FILE_SHARE_READ` 挡死（见 `open_artifact_denies_concurrent_writers`），
+    /// 没法再用真文件复现，只能用它把不一致分支打出来。
+    pub(crate) static FORCE_RECHECK_MISMATCH: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+/// 解压，并把「解压前在同一句柄上重算出来的摘要」与调用方**已经校验过**的摘要严格比对。
+///
+/// NEW-5：`extract_artifact_handle` 会返回一份新的 `InspectedArtifact`，调用方若把它丢掉
+/// 就等于白算一遍——校验与解压之间的窗口根本没闭合。任何不一致都必须中止安装（返回 Err，
+/// 不是打条日志就放行），并清掉已经落盘的解压残留。
+pub(crate) fn extract_artifact_handle_verified(
+    file: &mut File,
+    destination: &Path,
+    expected_sha256: &str,
+) -> Result<InspectedArtifact, String> {
+    let extracted = extract_artifact_handle(file, destination)?;
+    #[allow(unused_mut)]
+    let mut actual = extracted.sha256.clone();
+    #[cfg(test)]
+    if FORCE_RECHECK_MISMATCH.with(std::cell::Cell::get) {
+        actual = "f".repeat(64);
+    }
+    if !actual.eq_ignore_ascii_case(expected_sha256) {
+        let _ = fs::remove_dir_all(destination);
+        return Err(format!(
+            "插件制品在校验与解压之间发生变化：期望 {expected_sha256}，实际 {actual}"
+        ));
+    }
+    Ok(extracted)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -652,9 +726,23 @@ mod tests {
 
         // 攻击者在校验之后原子替换掉路径（rename 走的是新的文件对象）。
         let stashed = root.join("stashed.lfplugin");
-        fs::rename(&artifact, &stashed).unwrap();
-        write_test_zip(&artifact, &[("payload.txt", b"attacker")]);
-        assert_ne!(sha256_file(&artifact).unwrap(), inspected.sha256);
+        #[cfg(windows)]
+        {
+            // NEW-5：句柄以 FILE_SHARE_READ 打开后，连 rename/删除都拿不到 DELETE 访问权，
+            // 攻击者连「换掉路径」这一步都做不成。
+            let error = fs::rename(&artifact, &stashed)
+                .expect_err("持有制品句柄期间不应允许改名/删除");
+            assert!(
+                matches!(error.raw_os_error(), Some(32) | Some(33) | Some(5)),
+                "应为共享冲突：{error:?}"
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            fs::rename(&artifact, &stashed).unwrap();
+            write_test_zip(&artifact, &[("payload.txt", b"attacker")]);
+            assert_ne!(sha256_file(&artifact).unwrap(), inspected.sha256);
+        }
 
         let destination = root.join("out");
         let extracted = extract_artifact_handle(&mut handle, &destination).unwrap();
@@ -663,6 +751,93 @@ mod tests {
             fs::read(destination.join("payload.txt")).unwrap(),
             b"trusted"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// NEW-5 反向用例 A：解压时重算的摘要与已校验摘要不一致 → 必须返回 Err，
+    /// 并且不能留下任何落盘产物。
+    #[test]
+    fn extraction_rejects_recheck_sha_mismatch_and_leaves_no_output() {
+        let root = temp("recheck-mismatch");
+        fs::create_dir_all(&root).unwrap();
+        let artifact = root.join("plugin.lfplugin");
+        write_test_zip(&artifact, &[("payload.txt", b"trusted")]);
+
+        let mut handle = open_artifact(&artifact).unwrap();
+        let inspected = inspect_artifact_handle(&mut handle).unwrap();
+        let destination = root.join("out");
+
+        let error =
+            extract_artifact_handle_verified(&mut handle, &destination, &"0".repeat(64))
+                .unwrap_err();
+        assert!(error.contains("校验与解压之间发生变化"), "{error}");
+        assert!(!destination.exists(), "重校验失败后不得留下解压产物");
+
+        // 同一个句柄用正确摘要仍必须成功——证明上面的拒绝不是永真断言。
+        let extracted =
+            extract_artifact_handle_verified(&mut handle, &destination, &inspected.sha256).unwrap();
+        assert_eq!(extracted.sha256, inspected.sha256);
+        assert_eq!(
+            fs::read(destination.join("payload.txt")).unwrap(),
+            b"trusted"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// NEW-5 反向用例 B：持有 `open_artifact` 句柄期间，任何人都拿不到同一文件的写句柄。
+    #[cfg(windows)]
+    #[test]
+    fn open_artifact_denies_concurrent_writers() {
+        let root = temp("share-mode");
+        fs::create_dir_all(&root).unwrap();
+        let artifact = root.join("plugin.lfplugin");
+        write_test_zip(&artifact, &[]);
+
+        let handle = open_artifact(&artifact).unwrap();
+        let error = fs::OpenOptions::new()
+            .write(true)
+            .open(&artifact)
+            .expect_err("持有制品句柄期间不应再拿到写句柄");
+        assert!(
+            matches!(error.raw_os_error(), Some(32) | Some(33) | Some(5)),
+            "应为共享冲突：{error:?}"
+        );
+        // 只收紧写/删，另一个只读句柄仍允许（否则会打断自身的并发校验）。
+        assert!(open_artifact(&artifact).is_ok());
+
+        // 释放后写句柄立即可得——证明拒绝来自我们持有的句柄，而不是文件本身的权限位。
+        drop(handle);
+        assert!(fs::OpenOptions::new().write(true).open(&artifact).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// NEW-5：打开失败的错误信息必须能区分「不存在」与「被占用」。
+    #[test]
+    fn open_artifact_error_distinguishes_missing_from_locked() {
+        let root = temp("open-errors");
+        fs::create_dir_all(&root).unwrap();
+        let missing = root.join("missing.lfplugin");
+        let error = open_artifact(&missing).unwrap_err();
+        assert!(error.contains("不存在"), "{error}");
+        assert!(!error.contains("占用"), "{error}");
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let artifact = root.join("plugin.lfplugin");
+            write_test_zip(&artifact, &[]);
+            // 另一个进程以「谁也别想碰」的方式持有它。
+            let exclusive = fs::OpenOptions::new()
+                .write(true)
+                .share_mode(0)
+                .open(&artifact)
+                .unwrap();
+            let error = open_artifact(&artifact).unwrap_err();
+            assert!(error.contains("占用"), "{error}");
+            assert!(!error.contains("不存在"), "{error}");
+            drop(exclusive);
+            assert!(open_artifact(&artifact).is_ok());
+        }
         let _ = fs::remove_dir_all(root);
     }
 

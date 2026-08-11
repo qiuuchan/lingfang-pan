@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::builtin_plugin_index::parse_builtin_index;
 use crate::plugin_artifact_v4::{
-    collect_workspace_source_files, extract_artifact_handle, inspect_artifact,
+    collect_workspace_source_files, extract_artifact_handle_verified, inspect_artifact,
     inspect_artifact_handle, open_artifact, package_workspace, sha256_bytes, sha256_file,
     InspectedArtifact,
 };
@@ -1139,7 +1139,14 @@ impl PluginPackageManager {
         }
         let staging = self.staging_root().join(Uuid::new_v4().to_string());
         let staging_package = staging.join("package");
-        if let Err(error) = extract_artifact_handle(&mut artifact_file, &staging_package) {
+        // NEW-5：extract 会在同一句柄上把摘要重算一遍，这个结果必须与上面已经校验过的
+        // inspected.sha256 严格一致；不一致说明句柄背后的字节在校验之后被原地改过，
+        // 直接中止安装（不是打条日志放行），残留由 verified 版清掉。
+        if let Err(error) = extract_artifact_handle_verified(
+            &mut artifact_file,
+            &staging_package,
+            &inspected.sha256,
+        ) {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
         }
@@ -1744,7 +1751,8 @@ impl PluginPackageManager {
         let _guard = lock_or_recover(&self.file_lock);
         let workspace_id = Uuid::new_v4().to_string();
         let path = self.workspaces_root().join(&workspace_id);
-        extract_artifact_handle(&mut artifact_file, &path)?;
+        // NEW-5：与 install 同理，解压时重算的摘要必须与已校验的摘要一致。
+        extract_artifact_handle_verified(&mut artifact_file, &path, &inspected.sha256)?;
         let now = Utc::now().to_rfc3339();
         let workspace = DraftWorkspace {
             workspace_id,

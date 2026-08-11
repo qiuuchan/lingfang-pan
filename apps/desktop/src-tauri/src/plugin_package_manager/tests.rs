@@ -242,6 +242,44 @@ fn checksum_failure_leaves_ledger_unchanged() {
     let _ = fs::remove_dir_all(root);
 }
 
+/// NEW-5 反向用例：解压时在同一句柄上重算的摘要与已校验摘要不一致 → 安装必须被拒，
+/// 且不留任何落盘产物（staging / installed / 台账三处都要干净）。
+///
+/// 真实的「持有句柄期间原地覆写」已被 `open_artifact` 的 Windows 共享模式挡死，
+/// 无法再用真文件复现，这里用仅测试可见的故障注入把这条分支打出来；关掉注入后
+/// 同一份制品必须能正常装上，确保断言不是永真的。
+#[test]
+fn extract_recheck_mismatch_aborts_install_without_leftovers() {
+    let (manager, root) = manager();
+    let (path, inspected) = artifact(&root, "1.0.0", "print('one')");
+    let input = || InstallArtifactInput {
+        artifact_path: path.to_string_lossy().to_string(),
+        expected_sha256: Some(inspected.sha256.clone()),
+        package_id: Some("package-1".to_string()),
+        release_id: Some("release-1".to_string()),
+        origin: InstallationOrigin::Local,
+        protected: false,
+    };
+
+    crate::plugin_artifact_v4::FORCE_RECHECK_MISMATCH.with(|flag| flag.set(true));
+    let result = manager.install(input());
+    crate::plugin_artifact_v4::FORCE_RECHECK_MISMATCH.with(|flag| flag.set(false));
+
+    let error = result.unwrap_err();
+    assert!(error.contains("校验与解压之间发生变化"), "{error}");
+    assert!(manager.list_installations().is_empty());
+    for leftover in [manager.staging_root(), manager.installed_root()] {
+        let count = fs::read_dir(&leftover)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(count, 0, "安装被拒后不应留下残留：{}", leftover.display());
+    }
+
+    let installed = manager.install(input()).unwrap();
+    assert_eq!(installed.active_release.release_id, "release-1");
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn unsafe_release_id_is_rejected_before_creating_installation_paths() {
     let (manager, root) = manager();
