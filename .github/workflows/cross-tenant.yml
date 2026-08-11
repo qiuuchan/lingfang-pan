@@ -1,0 +1,47 @@
+name: Cross-tenant integration
+
+# 跨租户越权隔离数据库集成测试（cross-tenant-authz.database.integration.spec.ts）。
+# 设计要点（fail 真红）：
+#   - 脚本自带 docker 起真实 PostgreSQL 16 + MySQL 8.0，prisma deploy 后跑集成 spec；
+#   - spec 内部以 CROSS_TENANT_DATABASE_INTEGRATION=1 门控（未配置则 describe.skip，不会误挂）；
+#   - 脚本 set -euo pipefail，vitest 任一断言失败 → 非零退出 → 本作业变红。
+# 资产已存在（scripts/test-cross-tenant-database-integration.sh + spec），本作业仅把其接入 CI。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cross-tenant-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cross-tenant:
+    name: cross-tenant DB integration (PG16 + MySQL8)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run cross-tenant integration (real PG16 + MySQL8)
+        run: bash scripts/test-cross-tenant-database-integration.sh
+        env:
+          CROSS_TENANT_TEST_POSTGRES_IMAGE: postgres:16
+          CROSS_TENANT_TEST_MYSQL_IMAGE: mysql:8.0
