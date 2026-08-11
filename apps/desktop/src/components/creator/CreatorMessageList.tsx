@@ -78,6 +78,15 @@ const TurnBubble = memo(function TurnBubble({
         <SparklesIcon className="size-3.5" />
       </span>
       <div className="min-w-0 flex-1 space-y-3">
+        {/* AI 内容标识（P0-9）：本端所有 assistant 内容均为 AI 生成，统一标注，语义与 web 端一致。
+            内容来源（model/provider）当前前端不可得（relay 已剥离），故仅展示「AI 生成」语义标签，
+            不展示空字段。 */}
+        <div className="flex items-center gap-1.5">
+          <span className="inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium leading-4 text-primary">
+            AI 生成
+          </span>
+        </div>
+
         {parts.length > 0 ? (
           parts.map((part, partIndex) => {
             if (part.type === 'reasoning') {
