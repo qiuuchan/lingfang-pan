@@ -10,6 +10,7 @@ import {
 import { Prisma } from '@prisma/client';
 import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
+import { reportError } from './monitoring/sentry';
 
 export const IS_PUBLIC_KEY = 'isPublic';
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
@@ -151,6 +152,16 @@ export class AppExceptionFilter implements ExceptionFilter {
       },
       '未处理异常：已返回 500'
     );
+    // P3-1：未处理异常统一上报（DSN 缺失时 console 兜底，不静默）。
+    // 用户/租户上下文经脱敏层处理（JWT 等凭据不会进入上报通道）。
+    const user = (request as Request & { user?: AuthUser }).user;
+    reportError(error, {
+      requestId,
+      method: request.method,
+      url: request.path,
+      userId: user?.id,
+      teamId: user?.teamId ?? null,
+    });
     response.status(500).json({
       code: 'internal_error',
       message: '服务内部错误',
