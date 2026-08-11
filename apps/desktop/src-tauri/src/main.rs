@@ -484,6 +484,12 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 fn main() {
+    // P1-9：进程一起来就锁死沙箱逃生开关（--sandbox-soft）的 argv 快照，必须排在
+    // tauri builder 与任何插件 / 沙箱初始化之前。Windows 上同用户同完整性级别的进程可以
+    // OpenProcess(PROCESS_VM_WRITE) 改写目标进程 PEB 里的命令行，若拖到沙箱失败分支才第一次
+    // 读 argv，插件就能在宿主运行期间把逃生开关植进来，把 fail-closed 降级成放行。
+    process_util::SandboxPolicy::init_argv_snapshot();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         // 本地定时任务：系统通知（NOTIFY payload + 运行结果推送）。

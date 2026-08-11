@@ -36,7 +36,12 @@ use super::sandbox::SandboxHandle;
 /// 插件子进程往 `HKCU\Environment` 写一条同名变量并广播 `WM_SETTINGCHANGE`，无需任何提权就能
 /// 让宿主**下次启动**自动继承 `=1`，等于给自己配了个持久化的沙箱关闭开关，
 /// 而这正是 [`SandboxTier`] 注释里明令要避免的「插件自助降级」。
-/// 命令行参数由启动者一次性决定，已运行的宿主进程的 argv 不可被子进程改写。
+/// 命令行参数由启动者一次性决定，不会被插件持久化到下次启动。
+///
+/// **但 argv 并非天然只读**：Windows 上同用户同完整性级别的进程可以
+/// `OpenProcess(PROCESS_VM_WRITE)` 改写目标进程 PEB 里的命令行。因此本开关的取值
+/// 必须在进程最早期一次性快照锁定（见 [`SandboxPolicy::init_argv_snapshot`]），
+/// 而不能等到沙箱失败分支才现读。
 const SANDBOX_SOFT_FLAG: &str = "--sandbox-soft";
 
 /// argv 中是否出现逃生开关。抽出来是为了能脱离全局进程状态做单测。
@@ -44,12 +49,22 @@ fn sandbox_soft_in<I: IntoIterator<Item = OsString>>(args: I) -> bool {
     args.into_iter().any(|arg| arg == SANDBOX_SOFT_FLAG)
 }
 
-/// 进程级快照：首次调用时读一次 argv 并永久缓存。
+/// 进程级 argv 快照：一旦锁定，之后任何 argv 改写都读不到。
+static SANDBOX_SOFT_SNAPSHOT: OnceLock<bool> = OnceLock::new();
+
+/// 用给定的 argv 锁定快照；已锁定则原样返回首次锁定的值（幂等）。
+///
+/// 参数化 argv 来源是为了能在单测里模拟「启动后 argv 被改写」而不依赖进程真实命令行。
+fn lock_sandbox_soft_snapshot<I: IntoIterator<Item = OsString>>(args: I) -> bool {
+    *SANDBOX_SOFT_SNAPSHOT.get_or_init(|| sandbox_soft_in(args))
+}
+
+/// 读取逃生开关快照；快照未锁定时就地用当前 argv 锁定（兜底，正常路径下
+/// [`SandboxPolicy::init_argv_snapshot`] 已在 `main()` 第一行锁完）。
 ///
 /// 用 `args_os` 而非 `args`：后者遇到非 UTF-8 参数会 panic，不能让一个畸形参数把宿主带崩。
 fn sandbox_soft_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| sandbox_soft_in(std::env::args_os()))
+    lock_sandbox_soft_snapshot(std::env::args_os())
 }
 
 /// 插件来源档位 → 沙箱失败时的行为。
@@ -129,6 +144,25 @@ const UI_RESTRICTIONS_DEFAULT: u32 =
     uilimit::SYSTEMPARAMETERS | uilimit::DISPLAYSETTINGS | uilimit::EXITWINDOWS;
 
 impl SandboxPolicy {
+    /// P1-9：在进程启动最早期锁定逃生开关的 argv 快照，返回锁定值（幂等，可重复调用）。
+    ///
+    /// **必须由 `main()` 的第一条语句调用**。修复前，`--sandbox-soft` 的判定只会在
+    /// `attach_sandbox` 失败分支里被首次触发（[`SandboxTier::fail_closed`] → [`sandbox_soft_enabled`]），
+    /// 沙箱正常工作时 `OnceLock` 永远不初始化——第一次读 argv 发生在插件已经跑起来之后。
+    /// 而 Windows 上同用户同完整性级别的进程可以 `OpenProcess(PROCESS_VM_WRITE)` 改写目标进程
+    /// PEB 里的 `RTL_USER_PROCESS_PARAMETERS.CommandLine`，所以
+    /// [`SANDBOX_SOFT_FLAG`] 注释里「已运行宿主的 argv 不可被子进程改写」这一前提并不成立：
+    /// 插件可在运行期把逃生开关植进宿主命令行，等到 checkpoint 才读就会读到植入值。
+    /// 提前到进程最早期锁死后，之后任何改写都不再被读到
+    /// （反向用例见 `tests::late_argv_rewrite_does_not_flip_snapshot`，
+    /// 调用时机见 `tests::main_locks_argv_snapshot_before_anything_else`）。
+    ///
+    /// 挂在 `SandboxPolicy` 上而非做成模块级自由函数：`process_util` 对上层只导出类型，
+    /// 调用方不必额外放开 `guarded_spawn` 私有模块的可见性。
+    pub(crate) fn init_argv_snapshot() -> bool {
+        sandbox_soft_enabled()
+    }
+
     /// 长驻插件入口进程的策略。
     ///
     /// 配额取值：Chromium（headed，3 个 context）实测 Job 内峰值 12 个活跃进程，
@@ -549,6 +583,75 @@ mod tests {
         assert!(!sandbox_soft_in([os("--sandbox-softly")]));
         assert!(!sandbox_soft_in([os("--sandbox-soft=0")]));
         assert!(!sandbox_soft_in([os("LINGFANG_SANDBOX_SOFT=1")]));
+    }
+
+    /// P1-9 反向用例：宿主启动之后再改写 argv，逃生开关不得生效。
+    ///
+    /// 模拟 Windows 上「同用户同完整性级别的进程 `OpenProcess(VM_WRITE)` 改写目标 PEB 命令行」：
+    /// 先用启动时的干净 argv 锁定快照，再把一份带 `--sandbox-soft` 的「被改写 argv」喂进去，
+    /// 断言读到的仍是首次锁定值，且 UserInstalled 档依旧 fail-closed。
+    ///
+    /// 该用例对「每次 checkpoint 现读 argv」的实现必红：那种实现下第二次读会返回 true，
+    /// `fail_closed()` 随之变 false。（并发跑的其他用例即便先锁定过快照也不影响结论——
+    /// cargo test 的真实 argv 里同样没有 `--sandbox-soft`，锁定值一致为 false。）
+    #[test]
+    fn late_argv_rewrite_does_not_flip_snapshot() {
+        let os = |s: &str| OsString::from(s);
+
+        // 启动时的 argv：不带逃生开关。
+        let locked = lock_sandbox_soft_snapshot([os("lingfang.exe")]);
+        assert!(!locked, "启动 argv 未带逃生开关，快照必须锁成 false");
+
+        // 启动之后被植入逃生开关。
+        let after_rewrite = lock_sandbox_soft_snapshot([os("lingfang.exe"), os(SANDBOX_SOFT_FLAG)]);
+        assert!(
+            !after_rewrite,
+            "后写入的 {SANDBOX_SOFT_FLAG} 不得生效，快照只认启动时锁定的值"
+        );
+        assert!(
+            !sandbox_soft_enabled(),
+            "生产读取口同样不得看到后写入的逃生开关"
+        );
+        assert!(
+            SandboxTier::UserInstalled.fail_closed(),
+            "逃生开关被运行时植入后，用户安装的插件仍必须 fail-closed"
+        );
+    }
+
+    /// P1-9 反向用例：argv 快照的初始化必须是 `main()` 的第一条语句。
+    ///
+    /// `OnceLock` 只能保证「锁定后不再变」，保证不了「锁得够早」——而缺陷恰恰是
+    /// 「沙箱正常时快照永不初始化，第一次读 argv 发生在插件已经运行之后」。
+    /// 故这里直接扫 `main.rs` 源码钉死调用时机：删掉该调用、或把它挪到 tauri builder
+    /// （及其插件 / setup 钩子）之后，本用例即变红。
+    #[test]
+    fn main_locks_argv_snapshot_before_anything_else() {
+        const MAIN_RS: &str = include_str!("../main.rs");
+
+        let body = MAIN_RS
+            .split_once("\nfn main() {")
+            .expect("main.rs 必须有 fn main()")
+            .1;
+        let first_statement = body
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty() && !line.starts_with("//"))
+            .expect("main() 不能是空函数");
+        assert!(
+            first_statement.contains("init_argv_snapshot()"),
+            "main() 的第一条语句必须是 argv 快照初始化，实际是：{first_statement}"
+        );
+
+        let init_at = body
+            .find("init_argv_snapshot()")
+            .expect("main() 里找不到 argv 快照初始化调用");
+        let builder_at = body
+            .find("tauri::Builder::default()")
+            .expect("main() 里找不到 tauri builder");
+        assert!(
+            init_at < builder_at,
+            "argv 快照必须在 tauri builder（会拉起插件与 setup 钩子）之前锁定"
+        );
     }
 
     #[test]
