@@ -1,17 +1,20 @@
 # =============================================================================
-# 灵坊桌面端 · 更新包 minisign 签名模板（TEMPLATE）
+# 灵坊桌面端 · 更新包 minisign 签名与上报（P1-8 三件套之「签名」环节）
 # -----------------------------------------------------------------------------
 # 用途：在发布流水线产出安装包后，用团队私钥对其做 minisign 签名，并把 .sig 全文
-#       上报给后端，由后端写入 LatestAsset.signature，供桌面壳（update.rs 的
-#       verify_update_signature）在配置 LINGFANG_UPDATER_PUBKEY 后强制验签。
+#       上报给后端 POST /api/admin/release-signature，由后端写入 ReleaseAsset.signature，
+#       供桌面壳（update.rs 的 verify_update_signature，编译期内嵌 UPDATER_PUBKEY）
+#       在下载时强制验签（fail-closed）。
 #
-# 本文件默认以 workflow_dispatch 手动触发，不会自动运行，可安全提交。
-# 接入前需补齐：
-#   1) Secrets：MINISIGN_KEY（minisign.key 全文）、MINISIGN_PASSWORD（私钥口令）、
-#      MINISIGN_PUBKEY（base64 公钥行，仅用于本地核对）、
-#      BACKEND_API（后端地址）、BACKEND_TOKEN（上报用令牌）。
-#   2) 本模板假设安装包已由其他流水线产出并上传为 artifact/可访问路径；
-#      若需在本流程内构建，请改用 tauri-apps/tauri-action（各平台 runner + webview 依赖）。
+# 触发：默认 workflow_dispatch（手动、经评审的发布动作），不随 push 自动跑——
+#       私钥属于高敏感 secret，签名动作应可审计、不可逆。
+#
+# 密钥关系（务必一致）：
+#   - 本流程用 CI Secret MINISIGN_KEY（minisign 私钥全文）签名；
+#   - 其对应公钥的 base64 公钥行（去 untrusted comment）必须编译期内嵌到
+#     apps/desktop/src-tauri/src/update.rs 的 UPDATER_PUBKEY，二者不匹配则桌面拒绝更新。
+#   - 轮换：生成新 keypair → 改 UPDATER_PUBKEY + 更新 MINISIGN_KEY → 重新编译桌面壳。
+#   详见 docs/ci-secrets.md。
 # =============================================================================
 name: Desktop Updater Signing
 
@@ -19,18 +22,21 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version, e.g. 1.2.3'
+        description: 'Release version (semver, e.g. 1.2.3)'
         required: true
       platform:
-        description: 'Target platform, e.g. windows / darwin / linux'
+        description: 'Target platform, one of WINDOWS / DARWIN / LINUX'
         required: true
+        default: WINDOWS
       arch:
-        description: 'Target arch, e.g. x86_64 / aarch64'
+        description: 'Target arch, one of X86_64 / AARCH64 / UNIVERSAL'
         required: true
+        default: X86_64
       artifact-path:
         description: 'Path to the built installer (relative to workspace root)'
         required: true
 
+# 最小权限：仅读源码；签名/上报所需凭据全部来自 encrypted secrets，不经 GITHUB_TOKEN 写库。
 permissions:
   contents: read
 
@@ -42,15 +48,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install minisign (static binary, no Rust toolchain needed)
+      # minisign 静态二进制：下载后必须校验 SHA-256（防供应链投毒），绝不盲装。
+      # MINISIGN_SHA256 在仓库 Settings → Secrets/Variables 中维护；升级 minisign 时同步更新。
+      - name: Install minisign (sha256-pinned)
+        env:
+          MINISIGN_SHA256: ${{ vars.MINISIGN_SHA256 }}
         run: |
-          curl -fsSL https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz -o minisign.tar.gz
+          set -euo pipefail
+          URL="https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz"
+          curl -fsSL "$URL" -o minisign.tar.gz
+          if [ -z "${MINISIGN_SHA256:-}" ]; then
+            echo "::error::vars.MINISIGN_SHA256 未配置，拒绝盲装 minisign（fail-closed）"
+            exit 1
+          fi
+          ACTUAL=$(sha256sum minisign.tar.gz | cut -d' ' -f1)
+          if [ "$ACTUAL" != "$MINISIGN_SHA256" ]; then
+            echo "::error::minisign 校验和不符（期望 $MINISIGN_SHA256，实际 $ACTUAL），疑似被篡改"
+            exit 1
+          fi
           tar xzf minisign.tar.gz
-          sudo mv minisign-0.11-linux/minisign /usr/local/bin/minisign
-          minisign --version
+          chmod +x minisign-0.11-linux/minisign
+          ./minisign-0.11-linux/minisign --version
 
       - name: Restore signing key from secret
         run: |
+          set -euo pipefail
           printf '%s\n' "${{ secrets.MINISIGN_KEY }}" > minisign.key
           chmod 600 minisign.key
 
@@ -58,21 +80,28 @@ jobs:
         env:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: |
-          minisign -S \
+          set -euo pipefail
+          SIG="${{ github.workspace }}/${{ inputs.artifact-path }}.sig"
+          ./minisign-0.11-linux/minisign -S \
             -s minisign.key \
             -p "$MINISIGN_PASSWORD" \
             -m "${{ github.workspace }}/${{ inputs.artifact-path }}" \
-            -x "${{ github.workspace }}/${{ inputs.artifact-path }}.sig" \
+            -x "$SIG" \
             -t "lingfang-updater ${{ inputs.version }} (${{ inputs.platform }}-${{ inputs.arch }})"
           echo "--- .sig 全文（需整体存入后端 signature 字段，含 untrusted comment 行）---"
-          cat "${{ inputs.artifact-path }}.sig"
+          cat "$SIG"
 
       - name: Report signature to backend
+        env:
+          BACKEND_API: ${{ secrets.BACKEND_API }}
+          BACKEND_TOKEN: ${{ secrets.BACKEND_TOKEN }}
         run: |
-          # 后端需新增接口：接收 { version, platform, arch, signature(.sig 全文) }
-          # 并将其写入对应 LatestAsset.signature，供桌面壳验签。
-          SIG_JSON=$(jq -Rs . < "${{ inputs.artifact-path }}.sig")
-          curl -fsSL -X POST "${{ secrets.BACKEND_API }}/api/admin/release-signature" \
-            -H "Authorization: Bearer ${{ secrets.BACKEND_TOKEN }}" \
+          set -euo pipefail
+          SIG="${{ github.workspace }}/${{ inputs.artifact-path }}.sig"
+          # 后端 POST /api/admin/release-signature 已存在：要求 platform.release.manage
+          # 权限（BACKEND_TOKEN 须为平台管理员令牌）。上报失败（非 2xx）直接退出非零。
+          SIG_JSON=$(jq -Rs . < "$SIG")
+          curl -fsSL -X POST "$BACKEND_API/api/admin/release-signature" \
+            -H "Authorization: Bearer $BACKEND_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{\"version\":\"${{ inputs.version }}\",\"platform\":\"${{ inputs.platform }}\",\"arch\":\"${{ inputs.arch }}\",\"signature\":${SIG_JSON}}"
