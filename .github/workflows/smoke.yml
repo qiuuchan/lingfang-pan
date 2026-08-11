@@ -6,8 +6,8 @@ name: Smoke (integration)
 # 注意：本作业会构建并启动 API（较重），故不作为每提交必跑的单元门禁（见 ci.yml）。
 on:
   workflow_dispatch:
-  # push:
-  #   branches: [ main ]
+  push:
+    branches: [main]
 
 jobs:
   smoke:
