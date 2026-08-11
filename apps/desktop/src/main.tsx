@@ -3,7 +3,12 @@ import ReactDOM from 'react-dom/client';
 import { ThemeProvider } from 'next-themes';
 import App from '@/App';
 import { initApiBase, initAuthToken, tauriInvoke } from '@/lib/api';
+import { initSentry, installGlobalHandlers, reportError } from '@/monitoring';
 import '@/index.css';
+
+// P3-1/P3-2：最早期初始化错误上报（DSN 缺失时 console 兜底，不崩溃）。
+initSentry();
+installGlobalHandlers();
 
 // DESK-SHELL-05 修复：渲染树顶层 ErrorBoundary。
 // 此前任何 render 阶段抛错（如 sessionFromPayload 对畸形 /api/auth/me 响应裸解引用）
@@ -23,6 +28,8 @@ class RootErrorBoundary extends React.Component<
     // 控制台留痕便于排障（不外发），与「不写 .md 报告」一致。
     // eslint-disable-next-line no-console
     console.error('应用渲染崩溃：', error, info?.componentStack);
+    // P3-2：render 阶段崩溃同时上报（DSN 缺失时 console 兜底，不静默）。
+    reportError(error, { phase: 'react', componentStack: info?.componentStack ?? '' });
   }
 
   handleReset = () => {
