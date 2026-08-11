@@ -93,22 +93,33 @@ fn is_safe_download_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-// === 更新发布者签名验签（M1+：真实性 = 防伪造安装包的最后一道关）===
+// === 更新发布者签名验签（M1+：真实性 = 防伪造安装包的最后一道关，fail-closed）===
 //
 // `sha256` 只能验证「下载内容 == 后端声称的内容」，而该值来自同一后端——后端被入侵或
 // 响应被中间人篡改时，攻击者可把下载地址换成恶意安装包并同时改写 sha256。真正的真实性
-// 必须由发布者私钥签名、桌面壳用配置的公钥验签来保证（与 plugin_security 同机制）。
+// 必须由发布者私钥签名、桌面壳用编译期内嵌的公钥验签来保证（与 plugin_security 同机制）。
 //
-// 公钥来源：env `LINGFANG_UPDATER_PUBKEY`（minisign base64 公钥）。未配置时保持现有
-// SHA-256 行为，但更新时明确告警（非静默降级）；配置后则强制要求并验签（fail-closed）。
+// 公钥编译期内嵌（见 `UPDATER_PUBKEY`），不再从 env 读取——避免「漏配 env 即退回仅
+// SHA-256 的 fail-open」。下载的安装包必须携带由该公钥可验签的 minisign 签名，缺失 /
+// 非法 / 与公钥不配对一律拒绝。
 
-/// 读取更新发布者公钥（minisign base64）。未配置返回 None。
-fn read_updater_pubkey() -> Option<String> {
-    std::env::var("LINGFANG_UPDATER_PUBKEY")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
+/// 发布者 minisign 公钥（编译期内嵌，base64 of keynum(8)‖ed25519_pub(32)）。
+///
+/// 来源：LingFang 官方发布签名密钥对之公钥半；私钥仅存于 CI Secret `MINISIGN_KEY`，
+/// 由 desktop-sign.yml 签名并上报到 `POST /api/admin/release-signature`。
+/// 轮换：发版时生成新密钥对 → 改此处(公钥) + 更新 CI Secret(私钥) + 重新编译桌面壳。
+/// 任何下载安装包必须携带由该公钥可验签的 minisign 签名，否则更新被拒绝（fail-closed）。
+const UPDATER_PUBKEY: &str = "RUS5jLV46zPhjI3Yc5ozbBfwZpo9/1SoQ15ZRdXbVJm16X6RPiwOafZE";
+
+// 测试夹具（仅供 `#[cfg(test)]`）：sig1 由内嵌公钥对应私钥签署（正向）；
+// sig2 由另一密钥签署（反向/不配对）。消息见 `TEST_FIXTURE_MSG`。
+const TEST_FIXTURE_SIG_OK: &str = "untrusted comment: lingfang release artifact signature\nRUS5jLV46zPhjICNAS40bsReVk5FjlbeJtJNCuue3CiAA6U8QdyU2UT0rJLS+Ed+F0FXfKR9o4UOCBFgKRqSBlhzF/QvPfNI7As=\ntrusted comment: lingfang fixture\noPDLo5ygip6n6Zir8mNsObKWr/feJ2U9vMOvFaG3LqooeLZ0KS72C8fzYKHE9fSAQQpwrxk9Sp9QHNF5kFcXCQ==\n";
+const TEST_FIXTURE_SIG_WRONGKEY: &str = "untrusted comment: lingfang release artifact signature\nRUT1T5vmPChLqCkm7wMqCCRVsXGSf0g0kv2izOtg10aJxinqSG5gCs8+y8KI83HSuqfZgUWctAhHNKXJQrUmHp1Zdl5HH6zNMQQ=\ntrusted comment: lingfang fixture\nqPnHOEqjSNNktRnmUESH3DreZbrwuuzjimqUkOk4UGSz3X0HwLwDkusD/QYWpbcVMdAnqrZ88LYUEHlhIW+nBg==\n";
+
+// 上述签名对应的消息（ASCII）。
+const TEST_FIXTURE_MSG: &[u8] = b"LingFang test installer payload v0.0.0";
+
+
 
 /// 用发布者公钥验签安装包字节。任何失败（公钥非法/签名非法/不匹配）一律返回 Err（fail-closed）。
 fn verify_update_signature(pubkey_b64: &str, message: &[u8], signature_text: &str) -> Result<(), String> {
@@ -347,29 +358,25 @@ pub async fn download_update(
         ));
     }
 
-    // M1+：发布者签名验签（真实性）。配置公钥后强制要求并验证（fail-closed）；
-    // 未配置则明确告警——保持现有 SHA-256 行为，但绝不静默假称已验签。
-    match read_updater_pubkey() {
-        Some(pubkey) => {
-            if meta.signature.trim().is_empty() {
-                let _ = std::fs::remove_file(&setup_path);
-                return Err(
-                    "已配置更新签名公钥，但本次更新缺少签名（signature），已拒绝以防伪造安装包（请让后端下发 minisign 签名）"
-                        .to_string(),
-                );
-            }
-            let bytes =
-                std::fs::read(&setup_path).map_err(|e| format!("读取安装包以验签失败：{e}"))?;
-            if let Err(e) = verify_update_signature(&pubkey, &bytes, &meta.signature) {
-                let _ = std::fs::remove_file(&setup_path);
-                return Err(e);
-            }
+    // M1+：发布者签名验签（真实性，fail-closed）。安装包必须携带由内嵌发布者公钥
+    // 可验签的 minisign 签名；缺失 / 非法 / 与公钥不配对一律拒绝，绝不降级到仅 SHA-256。
+    if meta.signature.trim().is_empty() {
+        let _ = std::fs::remove_file(&setup_path);
+        return Err(
+            "该版本缺少发布者签名（signature），已拒绝更新以防伪造安装包（请让后端下发 minisign 签名）"
+                .to_string(),
+        );
+    }
+    let bytes = match std::fs::read(&setup_path) {
+        Ok(b) => b,
+        Err(e) => {
+            let _ = std::fs::remove_file(&setup_path);
+            return Err(format!("读取安装包以验签失败：{e}"));
         }
-        None => {
-            eprintln!(
-                "[updater] 警告：未配置 LINGFANG_UPDATER_PUBKEY，更新仅做 SHA-256 校验（该值来自同一后端，被入侵即失效）。生产环境请配置发布者公钥并让后端对安装包下发 minisign 签名。"
-            );
-        }
+    };
+    if let Err(e) = verify_update_signature(UPDATER_PUBKEY, &bytes, &meta.signature) {
+        let _ = std::fs::remove_file(&setup_path);
+        return Err(e);
     }
 
     let _ = on_event.send(DownloadEvent::Finished);
@@ -568,5 +575,35 @@ mod tests {
         let json = serde_json::to_string(&started).unwrap();
         assert!(json.contains("\"event\":\"Started\""));
         assert!(json.contains("\"contentLength\":1024"));
+    }
+
+    // === 发布者签名验签 fail-closed 回归（P1-8 三件套 + 正向）===
+    // 测试夹具由 scripts 之外的离线密钥对生成（见 UPDATER_PUBKEY 注释）；sig1 由内嵌
+    // 公钥对应私钥签署（正向），sig2 由另一密钥签署（反向/不配对）。
+
+    #[test]
+    fn release_signature_forward_valid_passes() {
+        // 正向：由内嵌公钥对应私钥签署的签名 → 验签通过（证明并非永真，确实在校验）。
+        assert!(verify_update_signature(UPDATER_PUBKEY, TEST_FIXTURE_MSG, TEST_FIXTURE_SIG_OK).is_ok());
+    }
+
+    #[test]
+    fn release_signature_missing_is_rejected() {
+        // 反向①：无签名（空字符串）→ 验签失败（fail-closed，缺失即拒）。
+        assert!(verify_update_signature(UPDATER_PUBKEY, TEST_FIXTURE_MSG, "").is_err());
+    }
+
+    #[test]
+    fn release_signature_wrong_key_is_rejected() {
+        // 反向②：由另一密钥签署的签名 → 与内嵌公钥不配对 → 验签失败。
+        assert!(verify_update_signature(UPDATER_PUBKEY, TEST_FIXTURE_MSG, TEST_FIXTURE_SIG_WRONGKEY).is_err());
+    }
+
+    #[test]
+    fn release_signature_tampered_message_is_rejected() {
+        // 反向③：签名有效但消息被篡改 → 验签失败（防篡改安装包）。
+        let mut tampered = TEST_FIXTURE_MSG.to_vec();
+        tampered.push(b'X');
+        assert!(verify_update_signature(UPDATER_PUBKEY, &tampered, TEST_FIXTURE_SIG_OK).is_err());
     }
 }
