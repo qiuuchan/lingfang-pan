@@ -230,6 +230,17 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
       throw badRequest('videoMaxSeconds 必须是 1~3600 的整数（秒）');
     return String(n);
   },
+  // P0-9 AI 内容审核开关：平台级总闸，默认 OFF（代码读侧兜底为 OFF，不可硬编码为 ON）。
+  // 仅 Admin 可配置；非公开字段（不进 PUBLIC_SETTING_KEYS），普通用户不可见。
+  // W0 决策挂点：决策 A（外部运营接管）落地后，将此开关语义升为「无条件硬门禁」——
+  // 即默认态改 ON、且无任何路径会把它降回 OFF 而静默放行。本仓库仅实现机制，不绑定供应商。
+  // 开关 ON 时，若审核供应商未配置或调用失败/超时，输出按 fail-closed 被拒（绝不静默放行）。
+  aiModerationEnabled: (raw) => {
+    const v = raw.trim().toLowerCase();
+    if (v !== 'true' && v !== 'false' && v !== '')
+      throw badRequest('aiModerationEnabled 仅支持 true / false（或清空回退默认 OFF）');
+    return v === 'true' ? 'true' : 'false';
+  },
 };
 
 /** Gitee owner/repo 路径段校验：仅 [A-Za-z0-9._-]，首尾须字母数字，禁连续点（防 ..），长度 0 或 1~100。

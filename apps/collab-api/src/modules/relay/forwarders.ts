@@ -25,11 +25,14 @@ export class UpstreamError extends Error {
   }
 }
 
-/** 一次转发的结果（统一 shape：chat 返回 tokens，image 返回 images）。 */
+/** 一次转发的结果（统一 shape：chat 返回 tokens，image 返回 images）。
+ *  text：非流式 chat 的完整输出文本（流式为 ''，因内容已逐 chunk 透传，relay 侧无完整文本）。
+ *  供 P0-9 输出审核钩子在「非流式」成功路径对完整输出做审核。 */
 export interface ForwardResult {
   inputTokens: number;
   outputTokens: number;
   images: number;
+  text: string;
 }
 
 const UPSTREAM_TIMEOUT_MS = 60_000; // 上游超时 60s（含 chat 流式）：超时即 abort，防日志卡 pending。
@@ -120,10 +123,12 @@ export async function forwardOpenAiChat(args: {
   };
   normalizeNonStreamReasoning(data);
   res.status(200).json(data);
+  const text = data.choices?.[0]?.message?.content ?? '';
   return {
     inputTokens: data.usage?.prompt_tokens ?? 0,
     outputTokens: data.usage?.completion_tokens ?? 0,
     images: 0,
+    text: typeof text === 'string' ? text : '',
   };
 }
 
@@ -176,7 +181,7 @@ export async function forwardOpenAiImage(args: {
   await ensureOk(upstream);
   const data = (await upstream.json()) as { data?: unknown[] };
   args.res.status(200).json(data);
-  return { inputTokens: 0, outputTokens: 0, images: Math.max(1, args.body.n ?? 1) };
+  return { inputTokens: 0, outputTokens: 0, images: Math.max(1, args.body.n ?? 1), text: '' };
 }
 
 /**
@@ -214,7 +219,7 @@ export async function forwardRawPassthrough(args: {
   } catch {
     args.res.status(200).send(text);
   }
-  return { inputTokens: 0, outputTokens: 0, images };
+  return { inputTokens: 0, outputTokens: 0, images, text: '' };
 }
 
 // === Anthropic 协议（/v1/messages） ===
@@ -262,6 +267,7 @@ export async function forwardAnthropicMessages(args: {
     inputTokens: data.usage?.input_tokens ?? 0,
     outputTokens: data.usage?.output_tokens ?? 0,
     images: 0,
+    text: '',
   };
 }
 
@@ -307,10 +313,14 @@ export async function forwardOpenAiChatViaAnthropic(args: {
   };
   const openai = anthropicToOpenAiResponse(data as never, createdSec);
   args.res.status(200).json(openai);
+  // 完整输出文本（供 P0-9 非流式审核钩子；非流式下 choices[0].message.content 已归一化）。
+  const openaiText = (openai as { choices?: { message?: { content?: string | null } }[] })
+    ?.choices?.[0]?.message?.content;
   return {
     inputTokens: data.usage?.input_tokens ?? 0,
     outputTokens: data.usage?.output_tokens ?? 0,
     images: 0,
+    text: typeof openaiText === 'string' ? openaiText : '',
   };
 }
 
