@@ -110,20 +110,77 @@ fn norm_exe(p: &OsString) -> Option<String> {
     Some(s.to_string())
 }
 
+/// 已知「启动器包装」前缀清单：这些程序把真正的目标命令行承接为单个参数，
+/// 使宿主 exe 藏在内层引号里（最常见 `cmd /c "host.exe --sandbox-soft"`），
+/// 从而绕过只看 first-token 的旧判定。命中后剥离前缀、对内层重新分词。
+const LAUNCHER_EXES: &[&str] = &[
+    "cmd",
+    "cmd.exe",
+    "powershell",
+    "powershell.exe",
+    "pwsh",
+    "wscript",
+    "wscript.exe",
+    "cscript",
+    "cscript.exe",
+    "rundll32",
+    "rundll32.exe",
+];
+
+/// 解包启动器包装前缀（如 `cmd /c "host.exe --sandbox-soft"`）。
+///
+/// 返回内层真实命令行 token：把第三 token 起的原始字符串拼回，再按命令行规则
+/// 重新拆分（内层可能是整段引号字符串）。非包装条目原样返回。
+fn unwrap_launcher(tokens: &[OsString]) -> Vec<OsString> {
+    if tokens.len() < 3 {
+        return tokens.to_vec();
+    }
+    let Some(first) = norm_exe(tokens.first().unwrap()) else {
+        return tokens.to_vec();
+    };
+    if !LAUNCHER_EXES.contains(&first.as_str()) {
+        return tokens.to_vec();
+    }
+    // 第二 token 必须是命令开关（/c -c /k /command -command 等），否则不是「承接命令行」用法。
+    let second = tokens[1].to_string_lossy().to_lowercase();
+    let is_command_switch = matches!(
+        second.as_str(),
+        "/c" | "-c" | "/k" | "/command" | "-command"
+    );
+    if !is_command_switch {
+        return tokens.to_vec();
+    }
+    // 把第三 token 起的原始字符串拼回，再按命令行规则重新拆分（内层可能是整段引号字符串）。
+    let remainder: Vec<String> = tokens[2..]
+        .iter()
+        .map(|t| t.to_string_lossy().to_string())
+        .collect();
+    let joined = remainder.join(" ");
+    tokenize_cmdline(&joined)
+}
+
 /// 某自启动条目是否以 `--sandbox-soft` 拉起宿主自身。
-/// `entries`：每条为自启动条目的 token 列表（entry[0] 为目标可执行路径）。
+/// `entries`：每条为自启动条目的 token 列表。
+/// 先经 `unwrap_launcher` 解包 `cmd /c` 等前缀，再扫描内层**所有** token：
+/// 任一 token 疑似宿主 exe 且条目带 `--sandbox-soft` 开关 → 判为播种。
 /// 参数化以便单测注入（见 `tests::autostart_seeds_sandbox_soft_*`）。
 fn autostart_seeds_sandbox_soft(host_exe: &Path, entries: &[Vec<OsString>]) -> bool {
     let Some(host) = norm_exe(&OsString::from(host_exe.as_os_str())) else {
         return false;
     };
     entries.iter().any(|tokens| {
-        let Some(target) = tokens.first().and_then(norm_exe) else {
+        let inner = unwrap_launcher(tokens);
+        // 条目必须带 --sandbox-soft 开关；再扫描内层所有 token 找宿主 exe。
+        let carries_flag = inner.iter().any(|t| t == SANDBOX_SOFT_FLAG);
+        if !carries_flag {
             return false;
-        };
-        let targets_self = target == host || target.ends_with(&host);
-        let carries_flag = tokens.iter().any(|t| t == SANDBOX_SOFT_FLAG);
-        targets_self && carries_flag
+        }
+        inner.iter().any(|t| {
+            let Some(target) = norm_exe(t) else {
+                return false;
+            };
+            target == host || target.ends_with(&host)
+        })
     })
 }
 
@@ -866,6 +923,38 @@ mod tests {
             OsString::from("--sandbox-soft"),
         ]];
         assert!(autostart_seeds_sandbox_soft(host, &entries));
+    }
+
+    #[test]
+    fn autostart_seeds_sandbox_soft_detects_cmd_c_wrapper() {
+        // T8 反向用例：`cmd /c "host.exe --sandbox-soft"` 包装播种。
+        // 宿主 exe 藏在第三 token 的引号子串内，旧实现只看 first-token 会漏检；
+        // 加固后 unwrap_launcher 解包前缀，应识别为播种。
+        let host = Path::new("C:\\Programs\\lingfang\\lingfang.exe");
+        let entries = vec![vec![
+            OsString::from("cmd"),
+            OsString::from("/c"),
+            OsString::from(r#""C:\Programs\lingfang\lingfang.exe" --sandbox-soft"#),
+        ]];
+        assert!(
+            autostart_seeds_sandbox_soft(host, &entries),
+            "cmd /c 包装的 --sandbox-soft 宿主条目必须被识别为播种"
+        );
+    }
+
+    #[test]
+    fn autostart_seeds_sandbox_soft_detects_powershell_wrapper() {
+        // T8 反向用例：`powershell -c "host.exe --sandbox-soft"` 同样应检出。
+        let host = Path::new("C:\\Programs\\lingfang\\lingfang.exe");
+        let entries = vec![vec![
+            OsString::from("powershell.exe"),
+            OsString::from("-c"),
+            OsString::from(r#""C:\Programs\lingfang\lingfang.exe" --sandbox-soft"#),
+        ]];
+        assert!(
+            autostart_seeds_sandbox_soft(host, &entries),
+            "powershell -c 包装的 --sandbox-soft 宿主条目必须被识别为播种"
+        );
     }
 
     #[test]
