@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { WebApiError, requestJson, setWebCsrfToken } from './api';
+import type { FetchImplementation } from './api';
 
-type FetchMock = ReturnType<typeof vi.fn>;
+// 用 requestJson 真实的注入点签名标注 mock，mock.calls 才会推断出正确的实参元组，
+// 无需把 calls[0] 硬转成 [string, RequestInit]（那样会触发 TS2352/TS2493）。
+type FetchMock = Mock<FetchImplementation>;
 
 function okResponse(payload: unknown): Response {
   return { ok: true, status: 200, json: async () => payload } as unknown as Response;
@@ -11,9 +15,15 @@ function errorResponse(status: number, payload: unknown): Response {
   return { ok: false, status, json: async () => payload } as unknown as Response;
 }
 
+// init 在签名上是可选参数，这里显式取出并校验：缺失即视为用例失败，而非静默放行。
+function initOf(fetchMock: FetchMock): RequestInit {
+  const init = fetchMock.mock.calls[0]?.[1];
+  if (init === undefined) throw new Error('fetch 未被调用，或调用时缺少 init 参数');
+  return init;
+}
+
 function headersOf(fetchMock: FetchMock): Headers {
-  const init = fetchMock.mock.calls[0][1] as RequestInit;
-  return init.headers as Headers;
+  return initOf(fetchMock).headers as Headers;
 }
 
 const passthrough = { parse: (value: unknown) => value };
@@ -22,7 +32,7 @@ describe('requestJson 成功路径', () => {
   it('返回 decoder.parse 的结果并透传 payload', async () => {
     const payload = { id: 'p-1', name: '插件' };
     const parse = vi.fn((value: unknown) => ({ ...(value as object), decoded: true }));
-    const fetchMock = vi.fn(async () => okResponse(payload));
+    const fetchMock = vi.fn<FetchImplementation>(async () => okResponse(payload));
 
     const result = await requestJson('/api/web/plugins', { parse }, {}, fetchMock);
 
@@ -32,19 +42,19 @@ describe('requestJson 成功路径', () => {
   });
 
   it('总是带 accept: application/json 与 credentials: include', async () => {
-    const fetchMock = vi.fn(async () => okResponse({}));
+    const fetchMock = vi.fn<FetchImplementation>(async () => okResponse({}));
 
     await requestJson('/api/web/ping', passthrough, {}, fetchMock);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [input, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [input] = fetchMock.mock.calls[0];
     expect(input).toBe('/api/web/ping');
-    expect(init.credentials).toBe('include');
+    expect(initOf(fetchMock).credentials).toBe('include');
     expect(headersOf(fetchMock).get('accept')).toBe('application/json');
   });
 
   it('有 body 时补 content-type: application/json，无 body 时不补', async () => {
-    const withBody = vi.fn(async () => okResponse({}));
+    const withBody = vi.fn<FetchImplementation>(async () => okResponse({}));
     await requestJson(
       '/api/web/plugins',
       passthrough,
@@ -53,13 +63,13 @@ describe('requestJson 成功路径', () => {
     );
     expect(headersOf(withBody).get('content-type')).toBe('application/json');
 
-    const withoutBody = vi.fn(async () => okResponse({}));
+    const withoutBody = vi.fn<FetchImplementation>(async () => okResponse({}));
     await requestJson('/api/web/plugins', passthrough, { method: 'GET' }, withoutBody);
     expect(headersOf(withoutBody).get('content-type')).toBeNull();
   });
 
   it('保留调用方自定义头并保留 method/body', async () => {
-    const fetchMock = vi.fn(async () => okResponse({}));
+    const fetchMock = vi.fn<FetchImplementation>(async () => okResponse({}));
 
     await requestJson(
       '/api/web/plugins',
@@ -68,14 +78,14 @@ describe('requestJson 成功路径', () => {
       fetchMock
     );
 
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const init = initOf(fetchMock);
     expect(init.method).toBe('POST');
     expect(init.body).toBe('{}');
     expect(headersOf(fetchMock).get('x-trace-id')).toBe('trace-1');
   });
 
   it('decoder.parse 抛错时向上抛出', async () => {
-    const fetchMock = vi.fn(async () => okResponse({ bad: true }));
+    const fetchMock = vi.fn<FetchImplementation>(async () => okResponse({ bad: true }));
     const decoder = {
       parse: () => {
         throw new Error('schema 校验失败');
@@ -90,7 +100,7 @@ describe('requestJson 成功路径', () => {
 
 describe('requestJson 错误路径', () => {
   it('非 2xx 时按响应体抛出 WebApiError', async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn<FetchImplementation>(async () =>
       errorResponse(429, { code: 'x', message: '限量', details: { retry_after: 30 } })
     );
 
@@ -107,7 +117,9 @@ describe('requestJson 错误路径', () => {
   });
 
   it('错误体为数组时回退到 http_<status> 与默认文案', async () => {
-    const fetchMock = vi.fn(async () => errorResponse(500, [{ code: 'ignored' }]));
+    const fetchMock = vi.fn<FetchImplementation>(async () =>
+      errorResponse(500, [{ code: 'ignored' }])
+    );
 
     const error = (await requestJson('/api/web/plugins', passthrough, {}, fetchMock).catch(
       (caught: unknown) => caught
@@ -120,14 +132,14 @@ describe('requestJson 错误路径', () => {
   });
 
   it('错误体为非对象（字符串/null）时回退', async () => {
-    const stringBody = vi.fn(async () => errorResponse(403, 'forbidden'));
+    const stringBody = vi.fn<FetchImplementation>(async () => errorResponse(403, 'forbidden'));
     const fromString = (await requestJson('/api/web/x', passthrough, {}, stringBody).catch(
       (caught: unknown) => caught
     )) as WebApiError;
     expect(fromString.code).toBe('http_403');
     expect(fromString.message).toBe('请求失败：HTTP 403');
 
-    const nullBody = vi.fn(async () => errorResponse(404, null));
+    const nullBody = vi.fn<FetchImplementation>(async () => errorResponse(404, null));
     const fromNull = (await requestJson('/api/web/x', passthrough, {}, nullBody).catch(
       (caught: unknown) => caught
     )) as WebApiError;
@@ -137,7 +149,7 @@ describe('requestJson 错误路径', () => {
   });
 
   it('响应体无法解析为 JSON 时回退', async () => {
-    const fetchMock = vi.fn(
+    const fetchMock = vi.fn<FetchImplementation>(
       async () =>
         ({
           ok: false,
@@ -158,7 +170,9 @@ describe('requestJson 错误路径', () => {
   });
 
   it('code/message 字段类型不是字符串时也回退', async () => {
-    const fetchMock = vi.fn(async () => errorResponse(400, { code: 42, message: { zh: '坏' } }));
+    const fetchMock = vi.fn<FetchImplementation>(async () =>
+      errorResponse(400, { code: 42, message: { zh: '坏' } })
+    );
 
     const error = (await requestJson('/api/web/x', passthrough, {}, fetchMock).catch(
       (caught: unknown) => caught
@@ -170,7 +184,9 @@ describe('requestJson 错误路径', () => {
 
   it('错误路径不会调用 decoder.parse', async () => {
     const parse = vi.fn();
-    const fetchMock = vi.fn(async () => errorResponse(401, { code: 'unauthorized' }));
+    const fetchMock = vi.fn<FetchImplementation>(async () =>
+      errorResponse(401, { code: 'unauthorized' })
+    );
 
     await expect(requestJson('/api/web/x', { parse }, {}, fetchMock)).rejects.toBeInstanceOf(
       WebApiError
@@ -183,30 +199,30 @@ describe('requestJson CSRF 分支', () => {
   it('写方法带 x-csrf-token，GET/HEAD 不带；空 token 一律不带', async () => {
     setWebCsrfToken('csrf-abc');
     try {
-      const post = vi.fn(async () => okResponse({}));
+      const post = vi.fn<FetchImplementation>(async () => okResponse({}));
       await requestJson('/api/web/x', passthrough, { method: 'POST', body: '{}' }, post);
       expect(headersOf(post).get('x-csrf-token')).toBe('csrf-abc');
 
-      const lowerCaseDelete = vi.fn(async () => okResponse({}));
+      const lowerCaseDelete = vi.fn<FetchImplementation>(async () => okResponse({}));
       await requestJson('/api/web/x', passthrough, { method: 'delete' }, lowerCaseDelete);
       expect(headersOf(lowerCaseDelete).get('x-csrf-token')).toBe('csrf-abc');
 
-      const get = vi.fn(async () => okResponse({}));
+      const get = vi.fn<FetchImplementation>(async () => okResponse({}));
       await requestJson('/api/web/x', passthrough, { method: 'GET' }, get);
       expect(headersOf(get).get('x-csrf-token')).toBeNull();
 
-      const head = vi.fn(async () => okResponse({}));
+      const head = vi.fn<FetchImplementation>(async () => okResponse({}));
       await requestJson('/api/web/x', passthrough, { method: 'HEAD' }, head);
       expect(headersOf(head).get('x-csrf-token')).toBeNull();
 
-      const noMethod = vi.fn(async () => okResponse({}));
+      const noMethod = vi.fn<FetchImplementation>(async () => okResponse({}));
       await requestJson('/api/web/x', passthrough, {}, noMethod);
       expect(headersOf(noMethod).get('x-csrf-token')).toBeNull();
     } finally {
       setWebCsrfToken('');
     }
 
-    const afterReset = vi.fn(async () => okResponse({}));
+    const afterReset = vi.fn<FetchImplementation>(async () => okResponse({}));
     await requestJson('/api/web/x', passthrough, { method: 'POST', body: '{}' }, afterReset);
     expect(headersOf(afterReset).get('x-csrf-token')).toBeNull();
   });
