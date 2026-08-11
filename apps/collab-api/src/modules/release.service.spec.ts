@@ -40,7 +40,9 @@ function mockPrisma() {
   };
   const releaseAsset = {
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
     delete: vi.fn(),
   };
   // $transaction：把回调执行器替换为「直接用同一份 tx 对象」（单测不验真实事务隔离，只验调用链）。
@@ -88,6 +90,105 @@ describe('ReleaseService', () => {
       code: 'forbidden',
     });
     expect(prisma.release.create).not.toHaveBeenCalled();
+  });
+
+  // === reportReleaseSignature（POST /api/admin/release-signature，P1-8 三件套 + 正向）===
+  // 良构 minisign 签名（与桌面侧 minisign-verify 完全兼容）：untrusted comment / bin1(74B) /
+  // trusted comment / globalSig(64B)。
+  const VALID_SIG = `untrusted comment: lingfang release artifact signature
+RUS5jLV46zPhjICNAS40bsReVk5FjlbeJtJNCuue3CiAA6U8QdyU2UT0rJLS+Ed+F0FXfKR9o4UOCBFgKRqSBlhzF/QvPfNI7As=
+trusted comment: lingfang fixture
+oPDLo5ygip6n6Zir8mNsObKWr/feJ2U9vMOvFaG3LqooeLZ0KS72C8fzYKHE9fSAQQpwrxk9Sp9QHNF5kFcXCQ==`;
+
+  it('非平台管理员上报签名被 ensurePlatformAdmin 拒绝（403）', async () => {
+    auth.ensurePlatformAdmin.mockImplementation(() => {
+      throw forbidden('仅平台管理员可操作');
+    });
+    await expect(
+      service.reportReleaseSignature('user-member', {
+        version: '1.0.0',
+        platform: 'WINDOWS',
+        arch: 'X86_64',
+        signature: VALID_SIG,
+      })
+    ).rejects.toMatchObject({ status: 403, code: 'forbidden' });
+    expect(prisma.releaseAsset.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('签名文本非法（非良构 minisign）被 assertWellFormedMinisign 拒绝（400）', async () => {
+    await expect(
+      service.reportReleaseSignature('user-admin', {
+        version: '1.0.0',
+        platform: 'WINDOWS',
+        arch: 'X86_64',
+        signature: 'this-is-not-a-minisign-signature',
+      })
+    ).rejects.toMatchObject({ status: 400, code: 'bad_request' });
+    expect(auth.ensurePlatformAdmin).toHaveBeenCalled();
+    expect(prisma.releaseAsset.update).not.toHaveBeenCalled();
+  });
+
+  it('上报签名成功：幂等 upsert 写入 ReleaseAsset.signature 并审计', async () => {
+    prisma.release.findUnique.mockResolvedValue(
+      makeRelease({ id: 'release-1', version: '1.0.0', channel: 'STABLE' })
+    );
+    prisma.releaseAsset.findFirst.mockResolvedValue({
+      id: 'asset-1',
+      releaseId: 'release-1',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      signature: null,
+    });
+    prisma.releaseAsset.update.mockResolvedValue({
+      id: 'asset-1',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      signature: VALID_SIG,
+    });
+
+    const result = await service.reportReleaseSignature('user-admin', {
+      version: '1.0.0',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      signature: VALID_SIG,
+    });
+
+    expect(result.asset.signature).toBe(VALID_SIG);
+    expect(prisma.releaseAsset.update).toHaveBeenCalledWith({
+      where: { id: 'asset-1' },
+      data: { signature: VALID_SIG },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalled();
+  });
+
+  it('重复上报同 version+platform+arch 仅更新签名（幂等，不报错）', async () => {
+    prisma.release.findUnique.mockResolvedValue(
+      makeRelease({ id: 'release-1', version: '1.0.0', channel: 'STABLE' })
+    );
+    prisma.releaseAsset.findFirst.mockResolvedValue({
+      id: 'asset-1',
+      releaseId: 'release-1',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      signature: null,
+    });
+    prisma.releaseAsset.update.mockResolvedValue({
+      id: 'asset-1',
+      platform: 'WINDOWS',
+      arch: 'X86_64',
+      signature: VALID_SIG,
+    });
+    const dto = {
+      version: '1.0.0',
+      platform: 'WINDOWS' as const,
+      arch: 'X86_64' as const,
+      signature: VALID_SIG,
+    };
+
+    await expect(service.reportReleaseSignature('user-admin', dto)).resolves.toBeDefined();
+    await expect(service.reportReleaseSignature('user-admin', dto)).resolves.toBeDefined();
+    expect(prisma.releaseAsset.update).toHaveBeenCalledTimes(2);
   });
 
   it('同 channel+version 已存在时 create 抛 bad_request', async () => {

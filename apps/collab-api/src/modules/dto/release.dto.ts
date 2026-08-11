@@ -139,6 +139,34 @@ export class ReleaseAssetCreateDto {
   sizeBytes?: number;
 }
 
+/** POST /api/admin/release-signature 入参：CI 上报某平台产物的 minisign 发布者签名（幂等 upsert）。
+ *  签名文本即 .minisig 内容（untrusted comment / base64 主签名 / trusted comment / base64 全局签名）。
+ *  真实性最终由桌面壳用编译期内嵌公钥验签把关；本端仅做结构校验 + 鉴权 + 幂等写入。 */
+export class ReleaseSignatureDto {
+  @ApiProperty({ description: '语义化版本号（与发布版本一致）', example: '1.0.0' })
+  @IsString()
+  @Matches(SEMVER_RE, { message: 'version 必须符合 semver（如 1.0.0）' })
+  version!: string;
+
+  @ApiPropertyOptional({ description: '发布通道（默认 STABLE）', enum: RELEASE_CHANNEL })
+  @IsOptional()
+  @IsEnum(RELEASE_CHANNEL, { message: 'channel 只允许 STABLE 或 BETA' })
+  channel?: (typeof RELEASE_CHANNEL)[number];
+
+  @ApiProperty({ description: '产物平台', enum: ASSET_PLATFORM })
+  @IsEnum(ASSET_PLATFORM, { message: 'platform 只允许 WINDOWS / DARWIN / LINUX' })
+  platform!: (typeof ASSET_PLATFORM)[number];
+
+  @ApiProperty({ description: '产物架构', enum: ASSET_ARCH })
+  @IsEnum(ASSET_ARCH, { message: 'arch 只允许 X86_64 / AARCH64 / UNIVERSAL' })
+  arch!: (typeof ASSET_ARCH)[number];
+
+  @ApiProperty({ description: 'minisign 签名文本（.minisig 内容）' })
+  @IsString()
+  @MinLength(1, { message: 'signature 不能为空' })
+  signature!: string;
+}
+
 // === 公开端点查询 DTO（query，由 ValidationPipe transform 自动绑定）===
 
 /** GET /api/releases/latest?channel=&platform=&arch=&currentVersion= 入参（全可选）。 */

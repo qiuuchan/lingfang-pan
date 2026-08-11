@@ -28,8 +28,35 @@ import type {
   ReleaseCreateDto,
   ReleaseLatestQueryDto,
   ReleaseListQueryDto,
+  ReleaseSignatureDto,
   ReleaseUpdateDto,
 } from './dto/release.dto';
+
+/** 结构化校验 minisign 签名文本（不依赖安装包字节）。
+ *  仅保证写入 `ReleaseAsset.signature` 的是良构 minisign 文本（4 行：untrusted comment /
+ *  base64 主签名(74B) / trusted comment / base64 全局签名(64B)），便于桌面壳后续验签。
+ *  真实性最终由桌面壳用编译期内嵌公钥验签把关（fail-closed）。 */
+function assertWellFormedMinisign(text: string): void {
+  const nonEmpty = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (nonEmpty.length < 4) {
+    throw badRequest('签名格式非法：缺少必要行（应为 untrusted comment / 主签名 / trusted comment / 全局签名）');
+  }
+  const bin1 = Buffer.from(nonEmpty[1], 'base64');
+  if (bin1.length !== 74) {
+    throw badRequest('签名格式非法：主签名段长度异常（期望 74 字节）');
+  }
+  // 算法标识必须为 Ed25519 预哈希（0x45 0x44），与桌面侧 minisign-verify 一致。
+  if (bin1[0] !== 0x45 || bin1[1] !== 0x44) {
+    throw badRequest('签名格式非法：算法标识异常（仅接受 minisign 预哈希签名）');
+  }
+  const globalSig = Buffer.from(nonEmpty[3], 'base64');
+  if (globalSig.length !== 64) {
+    throw badRequest('签名格式非法：全局签名长度异常（期望 64 字节）');
+  }
+  if (!nonEmpty[2].startsWith('trusted comment:')) {
+    throw badRequest('签名格式非法：缺少 trusted comment 行');
+  }
+}
 
 @Injectable()
 export class ReleaseService {
@@ -443,6 +470,39 @@ export class ReleaseService {
       releaseId: id,
     });
     return { ok: true };
+  }
+
+  /** POST /api/admin/release-signature：CI 上报某平台产物的 minisign 发布者签名（幂等 upsert）。
+   *  - 先 `ensurePlatformAdmin`（非平台管理员 → 403）。
+   *  - 结构化校验签名（失败 → 400）；不依赖安装包字节——真实性最终由桌面壳用编译期内嵌
+   *    公钥验签把关（fail-closed），本端只保证写入的 signature 是良构 minisign 文本。
+   *  - 按 channel+version 定位 Release，再按 platform+arch 定位 ReleaseAsset，写入 signature
+   *    （覆盖，幂等：重复上报同 version+platform+arch 仅更新签名）。 */
+  async reportReleaseSignature(actorId: string, dto: ReleaseSignatureDto) {
+    await this.auth.ensurePlatformAdmin(actorId);
+    assertWellFormedMinisign(dto.signature);
+    const channel = dto.channel ?? 'STABLE';
+    const release = await this.prisma.release.findUnique({
+      where: { channel_version: { channel, version: dto.version } },
+    });
+    if (!release) throw badRequest(`版本 ${dto.version}（${channel}）不存在，无法上报签名`);
+    const asset = await this.prisma.releaseAsset.findFirst({
+      where: { releaseId: release.id, platform: dto.platform, arch: dto.arch },
+    });
+    if (!asset) {
+      throw badRequest(`未找到匹配的产物（${dto.platform}/${dto.arch}），无法上报签名`);
+    }
+    const updated = await this.prisma.releaseAsset.update({
+      where: { id: asset.id },
+      data: { signature: dto.signature },
+    });
+    await this.audit(actorId, 'admin.release.signature_reported', 'ReleaseAsset', updated.id, {
+      version: dto.version,
+      channel,
+      platform: dto.platform,
+      arch: dto.arch,
+    });
+    return { asset: this.publicAsset(updated) };
   }
 
   // === 辅助方法 ===

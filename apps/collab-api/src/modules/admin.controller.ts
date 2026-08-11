@@ -41,6 +41,7 @@ import {
   AdminReleaseListQueryDto,
   ReleaseAssetCreateDto,
   ReleaseCreateDto,
+  ReleaseSignatureDto,
   ReleaseUpdateDto,
 } from './dto/release.dto';
 import { RevealSecretDto, UpdateSettingsDto, TestEmailDto } from './dto/settings.dto';
@@ -494,6 +495,15 @@ export class AdminController {
     @Param('assetId') assetId: string
   ) {
     return this.releases.deleteAsset(requireUser(req).id, id, assetId);
+  }
+
+  @RequirePermission('platform.release.manage')
+  @Post('release-signature')
+  @ApiOperation({
+    summary: 'CI 上报某平台产物的 minisign 发布者签名（幂等 upsert，fail-closed）',
+  })
+  reportReleaseSignature(@Req() req: Request, @Body() body: ReleaseSignatureDto) {
+    return this.releases.reportReleaseSignature(requireUser(req).id, body);
   }
 
   // === 平台设置（ensurePlatformAdmin 在 SettingsService 内） ===
