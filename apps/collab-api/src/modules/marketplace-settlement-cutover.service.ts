@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { AppError, conflict } from '../common';
@@ -54,20 +54,32 @@ type AnyClient = Record<string, any>;
 export class MarketplaceSettlementCutoverService implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | undefined;
   private started = false;
+  private readonly logger = new Logger(MarketplaceSettlementCutoverService.name);
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(MarketplaceCommerceService) private readonly commerce: MarketplaceCommerceService
   ) {}
 
+  /** 结算任务失败不能把进程带崩，但必须留痕——否则结算线程哑火不会有任何人知道。 */
+  private logSettlementJobFailure(error: unknown) {
+    this.logger.error(
+      {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      },
+      '市场结算定时任务失败：本轮已跳过'
+    );
+  }
+
   /** Startup catch-up is durable and unref'd; tests and one-shot workers can call
    * runSettlementJob directly without relying on an in-memory timer. */
   async onModuleInit() {
     if (process.env.MARKETPLACE_SETTLEMENT_AUTORUN === 'false') return;
     this.started = true;
-    void this.runSettlementJob(new Date()).catch(() => undefined);
+    void this.runSettlementJob(new Date()).catch((error) => this.logSettlementJobFailure(error));
     this.timer = setInterval(() => {
-      void this.runSettlementJob(new Date()).catch(() => undefined);
+      void this.runSettlementJob(new Date()).catch((error) => this.logSettlementJobFailure(error));
     }, 60_000);
     this.timer.unref?.();
   }

@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
@@ -61,6 +61,7 @@ const ARTIFACT_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 @Injectable()
 export class PluginSharedStateService implements OnModuleInit, OnModuleDestroy {
   private artifactReconcileTimer?: NodeJS.Timeout;
+  private readonly logger = new Logger(PluginSharedStateService.name);
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -431,13 +432,25 @@ export class PluginSharedStateService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** 对账失败不能把进程带崩，但必须留痕——否则保留对账哑火不会有任何人知道。 */
+  private logReconcileFailure(error: unknown) {
+    this.logger.error(
+      {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      },
+      '共享制品保留对账失败：本轮已跳过'
+    );
+  }
+
   onModuleInit() {
     this.artifactReconcileTimer = setInterval(
-      () => void this.reconcileArtifactRetention().catch(() => undefined),
+      () =>
+        void this.reconcileArtifactRetention().catch((error) => this.logReconcileFailure(error)),
       ARTIFACT_RECONCILE_INTERVAL_MS
     );
     this.artifactReconcileTimer.unref();
-    void this.reconcileArtifactRetention().catch(() => undefined);
+    void this.reconcileArtifactRetention().catch((error) => this.logReconcileFailure(error));
   }
 
   onModuleDestroy() {

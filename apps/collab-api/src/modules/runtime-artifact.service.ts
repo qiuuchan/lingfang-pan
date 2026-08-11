@@ -4,7 +4,7 @@ import { rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AppError, conflict, forbidden, notFound } from '../common';
 import { PrismaService } from '../prisma.service';
@@ -53,11 +53,25 @@ export function sharedArtifactRenewalMs() {
 
 @Injectable()
 export class RuntimeArtifactService {
+  private readonly logger = new Logger(RuntimeArtifactService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(ARTIFACT_STORE) private readonly store: ArtifactStore
   ) {}
+
+  /** 回滚删除失败不能盖掉原始错误，但必须留痕——否则孤儿对象会无声堆积。 */
+  private logRollbackDeleteFailure(objectKey: string, error: unknown) {
+    this.logger.error(
+      {
+        objectKey,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      },
+      '运行制品回滚清理失败：孤儿对象残留，等待定时清理回收'
+    );
+  }
   async createForInvocation(
     invocationId: string,
     input: {
@@ -159,7 +173,9 @@ export class RuntimeArtifactService {
         retainUntil,
       });
     } catch (error) {
-      await this.store.delete(objectKey).catch(() => undefined);
+      await this.store
+        .delete(objectKey)
+        .catch((deleteError) => this.logRollbackDeleteFailure(objectKey, deleteError));
       throw error;
     } finally {
       await rm(tempPath, { force: true });
@@ -520,7 +536,9 @@ export class RuntimeArtifactService {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
       );
     } catch (error) {
-      await this.store.delete(objectKey).catch(() => undefined);
+      await this.store
+        .delete(objectKey)
+        .catch((deleteError) => this.logRollbackDeleteFailure(objectKey, deleteError));
       if (error instanceof ArtifactUnavailableError)
         throw new AppError(410, 'workflow_result_expired', 'Preview 结果对象已被清理');
       throw error;

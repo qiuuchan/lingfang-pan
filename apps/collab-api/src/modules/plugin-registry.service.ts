@@ -653,10 +653,34 @@ export class PluginRegistryService {
     } catch (error) {
       await rm(staged.directory, { recursive: true, force: true });
       if (artifactKey) {
-        const referenced = await this.prisma.pluginRelease
-          .count({ where: { artifactKey } })
-          .catch(() => 0);
-        if (referenced === 0) await this.artifacts.delete(artifactKey).catch(() => undefined);
+        // artifactKey 是内容寻址、跨 release 复用的共享制品。引用计数查询失败时
+        // 绝不能降级成「无人引用」——一次 DB 抖动就会删掉仍被其他 release 引用的
+        // 制品，且不可逆。查询失败一律保守跳过清理，宁可留孤儿等定时清理回收。
+        let referenced: number | null = null;
+        try {
+          referenced = await this.prisma.pluginRelease.count({ where: { artifactKey } });
+        } catch (countError) {
+          this.logger.error(
+            {
+              artifactKey,
+              errorMessage: countError instanceof Error ? countError.message : String(countError),
+              errorStack: countError instanceof Error ? countError.stack : undefined,
+            },
+            '引用计数查询失败，保守跳过制品清理'
+          );
+        }
+        if (referenced === 0)
+          await this.artifacts.delete(artifactKey).catch((deleteError) => {
+            this.logger.error(
+              {
+                artifactKey,
+                errorMessage:
+                  deleteError instanceof Error ? deleteError.message : String(deleteError),
+                errorStack: deleteError instanceof Error ? deleteError.stack : undefined,
+              },
+              '上传失败回滚：孤儿制品删除失败，等待定时清理回收'
+            );
+          });
       }
       await this.audit(
         userId,
