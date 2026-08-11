@@ -67,6 +67,225 @@ fn sandbox_soft_enabled() -> bool {
     lock_sandbox_soft_snapshot(std::env::args_os())
 }
 
+// === P1-9 残余 ②：自启动播种检测（防 `--sandbox-soft` 被插件持久化注入）===
+//
+// 攻击：未提权插件在 `HKCU\...\Run`（或 Startup 目录 `.lnk`）写入以 `--sandbox-soft`
+// 拉起宿主自身的条目，宿主下次开机即静默降级沙箱（fail-closed → 放行）。
+// 防御：进程最早期枚举宿主自身的自启动落点；若任一以 `--sandbox-soft` 拉起宿主，
+// 判定为「被播种的开关」→ 忽略该开关（fail-closed）。手动直启（不在任何自启动条目中）
+// 仍正常 honors 开关，保留运维逃生舱。**不依赖 T1 降权。**
+//
+// 核心判定 `autostart_seeds_sandbox_soft` 参数化（接收自启动条目向量），便于单测注入；
+// Windows 下的真实枚举（注册表 Run/RunOnce + Startup `.lnk`）在 `autostart_scan` 中实现。
+
+/// 把一条自启动命令行拆成 token（尊重双引号）。
+/// `"C:\x\host.exe" --sandbox-soft` → [`C:\x\host.exe`, `--sandbox-soft`]。
+fn tokenize_cmdline(cmd: &str) -> Vec<OsString> {
+    let mut tokens = Vec::new();
+    let mut cur = String::new();
+    let mut in_q = false;
+    for ch in cmd.chars() {
+        match ch {
+            '"' => in_q = !in_q,
+            c if c.is_whitespace() && !in_q => {
+                if !cur.is_empty() {
+                    tokens.push(OsString::from(cur.clone()));
+                    cur.clear();
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        tokens.push(OsString::from(cur));
+    }
+    tokens
+}
+
+/// 路径归一（小写、去尾部 `.exe`、去引号），用于大小写不敏感比较。
+fn norm_exe(p: &OsString) -> Option<String> {
+    let s = p.to_string_lossy().to_lowercase();
+    let s = s.trim().trim_matches('"');
+    let s = s.strip_suffix(".exe").unwrap_or(s);
+    Some(s.to_string())
+}
+
+/// 某自启动条目是否以 `--sandbox-soft` 拉起宿主自身。
+/// `entries`：每条为自启动条目的 token 列表（entry[0] 为目标可执行路径）。
+/// 参数化以便单测注入（见 `tests::autostart_seeds_sandbox_soft_*`）。
+fn autostart_seeds_sandbox_soft(host_exe: &Path, entries: &[Vec<OsString>]) -> bool {
+    let Some(host) = norm_exe(&OsString::from(host_exe.as_os_str())) else {
+        return false;
+    };
+    entries.iter().any(|tokens| {
+        let Some(target) = tokens.first().and_then(norm_exe) else {
+            return false;
+        };
+        let targets_self = target == host || target.ends_with(&host);
+        let carries_flag = tokens.iter().any(|t| t == SANDBOX_SOFT_FLAG);
+        targets_self && carries_flag
+    })
+}
+
+/// 逃生开关是否真正生效：argv 含开关 且 未被自启动条目播种注入。
+fn sandbox_soft_honored(arg_flag: bool, autostart_seeded: bool) -> bool {
+    arg_flag && !autostart_seeded
+}
+
+/// 把字符串转 UTF-16LE 字节序列，用于 `.lnk` 文件二进制的子串匹配。
+fn utf16le_bytes(s: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(s.len() * 2);
+    for w in s.encode_utf16() {
+        out.extend_from_slice(&w.to_le_bytes());
+    }
+    out
+}
+
+/// `.lnk` 字节内容是否同时包含宿主 exe 路径与 `--sandbox-soft` 的 UTF-16LE 子串
+/// （best-effort 检测被播种的自启动快捷方式）。平台无关，便于单测注入合成字节。
+fn lnk_bytes_seed(host_norm: &str, bytes: &[u8]) -> bool {
+    let needle_exe = utf16le_bytes(host_norm);
+    let needle_flag = utf16le_bytes(SANDBOX_SOFT_FLAG);
+    if needle_exe.is_empty() || needle_flag.is_empty() {
+        return false;
+    }
+    let has_exe = bytes.windows(needle_exe.len()).any(|w| w == needle_exe.as_slice());
+    let has_flag = bytes.windows(needle_flag.len()).any(|w| w == needle_flag.as_slice());
+    has_exe && has_flag
+}
+
+#[cfg(windows)]
+mod autostart_scan {
+    use super::*;
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::Foundation::*;
+    use windows_sys::Win32::System::Registry::*;
+    use windows_sys::Win32::UI::Shell::*;
+
+    /// HKCU 下需扫描的自启动键（含 Wow6432Node 镜像）。
+    const RUN_KEYS: &[(&str, bool)] = &[
+        (r"Software\Microsoft\Windows\CurrentVersion\Run", false),
+        (r"Software\Microsoft\Windows\CurrentVersion\RunOnce", false),
+        (
+            r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Run",
+            true,
+        ),
+    ];
+
+    unsafe fn enum_run_values(hkey: HKEY, subkey: &str, wow64: bool) -> Vec<String> {
+        let mut out = Vec::new();
+        let sub_w: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut key: HKEY = std::ptr::null_mut();
+        let sam = KEY_READ | if wow64 { KEY_WOW64_32KEY } else { 0 };
+        if RegOpenKeyExW(hkey, sub_w.as_ptr(), 0, sam, &mut key) != 0 {
+            return out;
+        }
+        let mut name = vec![0u16; 16384];
+        let mut val = vec![0u8; 16384];
+        let mut i = 0u32;
+        loop {
+            let mut name_len = name.len() as u32;
+            let mut val_type = 0u32;
+            let mut val_len = val.len() as u32;
+            let r = RegEnumValueW(
+                key,
+                i,
+                name.as_mut_ptr(),
+                &mut name_len,
+                std::ptr::null_mut(),
+                &mut val_type,
+                val.as_mut_ptr(),
+                &mut val_len,
+            );
+            if r != 0 {
+                break;
+            }
+            if val_type == REG_SZ as u32 && val_len >= 2 {
+                let wcount = (val_len as usize) / 2;
+                let s =
+                    String::from_utf16_lossy(std::slice::from_raw_parts(val.as_ptr() as *const u16, wcount));
+                out.push(s.trim_end_matches('\0').to_string());
+            }
+            i += 1;
+            if i > 4096 {
+                break;
+            }
+        }
+        RegCloseKey(key);
+        out
+    }
+
+    /// 枚举 HKCU Run/RunOnce 自启动条目（命令 token 列表）。
+    pub(crate) fn enumerate_reg_run_entries() -> Vec<Vec<OsString>> {
+        let mut entries = Vec::new();
+        for (subkey, wow64) in RUN_KEYS {
+            for v in unsafe { enum_run_values(HKEY_CURRENT_USER, subkey, *wow64) } {
+                if !v.trim().is_empty() {
+                    entries.push(tokenize_cmdline(&v));
+                }
+            }
+        }
+        entries
+    }
+
+    /// 当前用户 Startup 目录（CSIDL_STARTUP）。
+    fn startup_folder() -> Option<PathBuf> {
+        let mut buf = [0u16; 260];
+        unsafe {
+            if SHGetFolderPathW(0 as HWND, CSIDL_STARTUP as i32, 0 as HANDLE, 0, buf.as_mut_ptr()) == S_OK {
+                let end = buf.iter().position(|&c| c == 0).unwrap_or(0);
+                let s = OsString::from_wide(&buf[..end]);
+                return Some(PathBuf::from(s));
+            }
+        }
+        None
+    }
+
+    /// Startup 目录 `.lnk` best-effort 检测：文件内同时出现宿主 exe 路径与 `--sandbox-soft`
+    /// 的 UTF-16LE 子串 → 视为被播种。`.lnk` 目标/命令行以 UTF-16LE 存于 StringData 段。
+    /// 的 UTF-16LE 子串 → 视为被播种。`.lnk` 目标/命令行以 UTF-16LE 存于 StringData 段。
+    pub(crate) fn startup_lnk_seeds(exe: &Path) -> bool {
+        let Some(folder) = startup_folder() else {
+            return false;
+        };
+        let host_norm = norm_exe(&OsString::from(exe.as_os_str())).unwrap_or_default();
+        let Ok(iter) = std::fs::read_dir(folder) else {
+            return false;
+        };
+        for entry in iter.flatten() {
+            let p = entry.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("lnk") {
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(&p) else {
+                continue;
+            };
+            if lnk_bytes_seed(&host_norm, &bytes) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+#[cfg(windows)]
+fn autostart_seeds_host_with_flag() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    // 1) 注册表 Run / RunOnce（HKCU，含 Wow6432Node）。
+    if autostart_seeds_sandbox_soft(&exe, &autostart_scan::enumerate_reg_run_entries()) {
+        return true;
+    }
+    // 2) Startup 目录 `.lnk`（best-effort UTF-16 子串匹配）。
+    autostart_scan::startup_lnk_seeds(&exe)
+}
+
+#[cfg(not(windows))]
+fn autostart_seeds_host_with_flag() -> bool {
+    false
+}
+
 /// 插件来源档位 → 沙箱失败时的行为。
 ///
 /// **决策源只用「插件目录是否在 `plugins_root`」这一个不可自述的信号**。
@@ -92,8 +311,12 @@ pub(crate) enum SandboxTier {
 
 impl SandboxTier {
     /// 沙箱不可用时是否拒绝启动。
+    ///
+    /// 逃生开关 `--sandbox-soft` 仅当「argv 显式携带 且 并非被自启动条目播种注入」时生效；
+    /// 若开关来自插件植入的 Run/Startup 自启动条目（P1-9 残余 ②），视为攻击并忽略，沙箱仍 fail-closed。
     pub(crate) fn fail_closed(self) -> bool {
-        matches!(self, SandboxTier::UserInstalled) && !sandbox_soft_enabled()
+        matches!(self, SandboxTier::UserInstalled)
+            && !sandbox_soft_honored(sandbox_soft_enabled(), autostart_seeds_host_with_flag())
     }
 }
 
@@ -616,6 +839,72 @@ mod tests {
             SandboxTier::UserInstalled.fail_closed(),
             "逃生开关被运行时植入后，用户安装的插件仍必须 fail-closed"
         );
+    }
+
+    // === P1-9 残余 ②：自启动播种检测（防 `--sandbox-soft` 被插件持久化注入）===
+
+    #[test]
+    fn autostart_seeds_sandbox_soft_detects_run_entry() {
+        // 反向①：HKCU\Run 中存在以 `--sandbox-soft` 拉起宿主自身的条目 → 判定播种。
+        let host = Path::new("C:\\Programs\\lingfang\\lingfang.exe");
+        let entries = vec![vec![
+            OsString::from(r"C:\Programs\lingfang\lingfang.exe"),
+            OsString::from("--sandbox-soft"),
+        ]];
+        assert!(
+            autostart_seeds_sandbox_soft(host, &entries),
+            "Run 条目标记宿主自身 + --sandbox-soft 必须被识别为播种"
+        );
+    }
+
+    #[test]
+    fn autostart_seeds_sandbox_soft_detects_quoted_path() {
+        // 路径带引号、大小写不一致也应命中（Windows 常见）。
+        let host = Path::new("C:\\Programs\\LingFang\\lingfang.EXE");
+        let entries = vec![vec![
+            OsString::from(r#""c:\programs\lingfang\lingfang.exe""#),
+            OsString::from("--sandbox-soft"),
+        ]];
+        assert!(autostart_seeds_sandbox_soft(host, &entries));
+    }
+
+    #[test]
+    fn autostart_seeds_sandbox_soft_ignores_unrelated_entries() {
+        // 反向之「无关条目」：不带开关、或目标不是宿主 → 不算播种（避免误伤正常自启动）。
+        let host = Path::new("C:\\Programs\\lingfang\\lingfang.exe");
+        let entries = vec![
+            vec![OsString::from(r"C:\Programs\lingfang\lingfang.exe")], // 无开关
+            vec![
+                OsString::from(r"C:\Other\notepad.exe"),
+                OsString::from("--sandbox-soft"),
+            ], // 目标不是宿主
+        ];
+        assert!(!autostart_seeds_sandbox_soft(host, &entries));
+    }
+
+    #[test]
+    fn lnk_bytes_seed_detects_planted_shortcut() {
+        // 反向②（`.lnk` 向量，best-effort）：合成一个同时含宿主路径与开关 UTF-16 的字节体。
+        let host_norm = "c:\\programs\\lingfang\\lingfang.exe";
+        let mut bytes: Vec<u8> = Vec::new();
+        // 模拟 .lnk StringData 段：宿主路径 + 命令行含 --sandbox-soft。
+        bytes.extend_from_slice(&utf16le_bytes(host_norm));
+        bytes.extend_from_slice(&utf16le_bytes(" \"C:\\Programs\\lingfang\\lingfang.exe\" --sandbox-soft"));
+        assert!(lnk_bytes_seed(host_norm, &bytes), "含宿主 + --sandbox-soft 的 .lnk 必须被识别");
+        // 只有宿主、无开关 → 不算。
+        let mut clean: Vec<u8> = Vec::new();
+        clean.extend_from_slice(&utf16le_bytes(host_norm));
+        clean.extend_from_slice(&utf16le_bytes(" \"C:\\Programs\\lingfang\\lingfang.exe\""));
+        assert!(!lnk_bytes_seed(host_norm, &clean));
+    }
+
+    #[test]
+    fn sandbox_soft_honored_ignores_seeded_flag() {
+        // 核心判定：argv 带开关但被自启动播种 → 不生效（fail-closed）；
+        // 手动直启（未播种）→ 生效（保留运维逃生舱）。
+        assert!(!sandbox_soft_honored(true, true), "被播种的开关必须被忽略");
+        assert!(sandbox_soft_honored(true, false), "手动直启的开关应生效");
+        assert!(!sandbox_soft_honored(false, false), "无开关时自然不生效");
     }
 
     /// P1-9 反向用例：argv 快照的初始化必须是 `main()` 的第一条语句。
