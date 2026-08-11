@@ -1,0 +1,34 @@
+title = "LingFang gitleaks config"
+
+[extend]
+# 继承 gitleaks 默认规则集，仅在此收窄已知误报。
+useDefault = true
+
+[allowlist]
+description = "收窄测试/文档/脚本/构建产物中的伪凭据与示例。真实密钥由外部密钥管理（GitHub Secrets / MINISIGN_KEY）注入，不入库。"
+paths = [
+  # 单元测试里的伪密钥 / 伪密码（非真实凭据）
+  "(?i)\\.spec\\.(ts|rs)$",
+  # Playwright / 集成测试 fixtures
+  "(?i)fixtures?/",
+  # 构建产物（已编译 JS，含测试桩与 [changed] 占位）
+  "(?i)^dist/",
+  # 开发 / 冒烟脚本里的示例账号与伪密码
+  "(?i)^scripts/",
+  # 文档里的示例密钥与命令
+  "(?i)^docs/",
+  # 临时生成物（含测试签名 / 公钥，非真实私钥）
+  "(?i)\\.tmp_",
+  # 自研更新器：仅含 minisign 公钥与测试签名，真实私钥经 GitHub Secrets 注入，不入库
+  "(?i)update\\.rs$",
+  # 发布签名逻辑与测试
+  "(?i)release-signing\\.(ts|spec\\.ts)$",
+  # 凭据加解密测试里的伪 key
+  "(?i)credential-cipher\\.(ts|spec\\.ts)$",
+]
+regexes = [
+  # minisign 公钥（RUS5... 前缀，可公开分发，非私钥）
+  "RUS5[A-Za-z0-9+/]{40,}={0,2}",
+  # 测试用伪 OpenAI 风格 key（credential-cipher.spec.ts）
+  "sk-1234567890abcdefghij",
+]

@@ -1,0 +1,30 @@
+name: Gitleaks
+
+# 密钥泄漏扫描：全量历史（fetch-depth: 0）+ 增量推送均扫描。
+# 配置见仓库根 .gitleaks.toml：继承默认规则，仅收窄测试/文档/脚本/构建产物中的伪凭据。
+# 真实密钥由 GitHub Secrets（及桌面签名 MINISIGN_KEY）注入，不入库，故扫描命中真实泄漏即变红。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml

@@ -1,0 +1,58 @@
+name: CodeQL
+
+# 静态分析安全扫描：JS/TS（后端 + 前端）+ Rust（桌面端）。
+# 设计要点：
+#   - 推送 main / PR / 每周一定时触发；
+#   - Rust 为 CodeQL beta 支持，autobuild 会编译 cargo；需先装 Tauri 2 系统库 + Rust toolchain；
+#   - 任一语言发现高危漏洞 → 安全事件写回仓库（security-events: write），作业按默认规则变红。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  security-events: write
+  contents: read
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, rust]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies (Rust only)
+        if: matrix.language == 'rust'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev libxkbcommon-dev \
+            libxcb1-dev libxrandr-dev libdbus-1-dev patchelf build-essential
+
+      - name: Setup Rust toolchain (Rust only)
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
