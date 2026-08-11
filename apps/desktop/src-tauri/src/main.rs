@@ -179,34 +179,25 @@ fn persist_auth_token(app: tauri::AppHandle, token: Option<String>) -> Result<()
     }
 }
 
+/// NEW-4 / P1-6：读取逻辑已下沉到 `secure_session::read_session_file`（可传入路径、可单测），
+/// 本命令只做「路径解析 + 三态映射」的薄封装。
+///
+/// 被拒绝的会话（Windows 明文伪造 / 旧格式密文 / 文件损坏）返回 Err + `SESSION_REAUTH_REQUIRED`
+/// 前缀：文件已在读路径里清掉，前端据此提示重新登录；恢复不出登录态这一点由 Err 本身保证。
 #[tauri::command]
 fn read_auth_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let path = session_token_path(&app)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取会话文件失败：{e}"))?;
-    let value: serde_json::Value =
-        serde_json::from_str(&raw).map_err(|e| format!("会话文件格式损坏：{e}"))?;
-
-    // P1-3 Step 1.5（R1 子项）：Windows 优先解 DPAPI 加密的 token_enc；
-    // 解密失败（损坏/篡改）按无会话处理，由 /api/auth/me 的 401 兜底登出。
-    #[cfg(windows)]
-    {
-        if let Some(b64) = value.get("token_enc").and_then(|v| v.as_str()) {
-            return match crate::secure_session::decrypt_token(b64) {
-                Ok(t) if !t.trim().is_empty() => Ok(Some(t)),
-                Ok(_) => Ok(None),
-                Err(e) => {
-                    eprintln!("[session] DPAPI 解密失败，按无会话处理：{e}");
-                    Ok(None)
-                }
-            };
+    match crate::secure_session::read_session_file(&path)? {
+        crate::secure_session::SessionRead::Token(t) => Ok(Some(t)),
+        crate::secure_session::SessionRead::None => Ok(None),
+        crate::secure_session::SessionRead::ReauthRequired(reason) => {
+            eprintln!("[session] 会话文件已被拒绝并清除，需重新登录：{reason}");
+            Err(format!(
+                "{}：{reason}",
+                crate::secure_session::REAUTH_REQUIRED_CODE
+            ))
         }
     }
-    // 兼容旧版明文（Unix 全平台；Windows 升级前遗留的明文文件）。
-    let token = value.get("token").and_then(|v| v.as_str()).map(|s| s.to_string());
-    Ok(token.filter(|t| !t.trim().is_empty()))
 }
 
 /// H-3：配置/删除本机「RBFlow 桥接令牌」（app_data/bridge_token.txt，Unix 0600）。

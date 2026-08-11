@@ -15,12 +15,94 @@
 //!
 //! **Unix**：权限（0600）由 `main.rs::persist_auth_token` 处理，本模块完全不接管。
 //!
-//! **兼容性**：读路径（`main.rs::read_auth_token`）优先解 `token_enc`，失败/旧版 `token`
-//! 明文文件回退，保证升级平滑。注意 P1-6 之后，**升级前写下的无 entropy 密文会解不开**，
-//! 此时按无会话处理、用户重登一次即完成迁移——这是刻意选择的 fail-closed 行为，
-//! 详见 `decrypt_token` 内注释。
+//! **兼容性（NEW-4 / P1-6 修订）**：读路径由本模块的 `read_session_file` 统一处理。
+//! Windows 上**只**认 `token_enc`；明文 `token` 字段、旧版无 entropy 密文、损坏文件
+//! 一律拒绝 + 清文件 + 要求重新登录（见 `read_session_file` 注释）。
 
 use std::path::Path;
+
+/// 会话文件读取结果（NEW-4）。
+///
+/// 不用 `Option<String>` 表达：「文件在、但不可信」（明文伪造 / 旧格式密文 / 损坏）必须与
+/// 「本来就没登录」区分开——前者要清掉文件并让前端提示重新登录，后者什么都不做。
+pub(crate) enum SessionRead {
+    /// 无会话：文件不存在，或文件里没有任何可用的 token 字段。
+    None,
+    /// 会话有效。
+    Token(String),
+    /// 会话文件已被拒绝并清除，前端应提示重新登录（附带原因，仅用于日志/提示）。
+    ReauthRequired(String),
+}
+
+/// 前端据此识别「需重新登录」的错误码前缀（`read_auth_token` 返回 Err 时携带）。
+pub(crate) const REAUTH_REQUIRED_CODE: &str = "SESSION_REAUTH_REQUIRED";
+
+/// 拒绝一份会话文件：删除它并返回重登信号。
+///
+/// P1-6：旧版（无 entropy）密文解不开时此前是 `Ok(None)` 静默登出——陈旧文件留在盘上，
+/// 每次启动重复解密失败刷 stderr，用户也拿不到任何提示。现在与明文拒绝共用同一套处置。
+/// 删除失败只记录不升级为错误：无论文件删没删掉，本次都不会产生登录态。
+fn reject_session(path: &Path, reason: impl Into<String>) -> SessionRead {
+    let reason = reason.into();
+    if let Err(e) = std::fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("[session] 清除失效会话文件失败：{e}");
+        }
+    }
+    SessionRead::ReauthRequired(reason)
+}
+
+/// Windows：只接受 DPAPI 密文，明文/旧格式一律拒绝。
+///
+/// NEW-4：本平台的写路径（`main.rs::persist_auth_token`）只会写 `token_enc`，所以磁盘上
+/// 出现明文 `token` 字段只有一种解释——会话文件被改写过。此前的「明文兜底」让同用户下的
+/// 任意进程（含被攻破的插件子进程）塞一个伪造 JWT 进去、应用启动即以该身份登录：
+/// `harden_file_acl` 只挡其他用户，entropy 只挡密文伪造，明文这条通道整个是敞开的。
+#[cfg(windows)]
+fn read_token_field(path: &Path, value: &serde_json::Value) -> SessionRead {
+    // 只要出现 token 字段就判篡改：我们从不写它，合法文件里不可能有。
+    if value.get("token").is_some() {
+        return reject_session(
+            path,
+            "检测到明文 token 字段（本平台只写 DPAPI 密文），会话文件疑似被篡改",
+        );
+    }
+    let Some(b64) = value.get("token_enc").and_then(|v| v.as_str()) else {
+        // 两个字段都没有：不是「旧格式」，只是没有会话，别误伤。
+        return SessionRead::None;
+    };
+    match decrypt_token(b64) {
+        Ok(t) if !t.trim().is_empty() => SessionRead::Token(t),
+        Ok(_) => reject_session(path, "DPAPI 解密结果为空"),
+        // 典型来源：P1-6 之前写下的无 entropy 密文，或被替换过的 blob。
+        Err(e) => reject_session(path, format!("DPAPI 解密失败（旧格式或已被篡改）：{e}")),
+    }
+}
+
+/// 非 Windows：写路径写的就是明文 + 0600，机密性由文件权限保证，明文字段照常接受。
+#[cfg(not(windows))]
+fn read_token_field(_path: &Path, value: &serde_json::Value) -> SessionRead {
+    match value.get("token").and_then(|v| v.as_str()) {
+        Some(t) if !t.trim().is_empty() => SessionRead::Token(t.to_string()),
+        _ => SessionRead::None,
+    }
+}
+
+/// 从指定路径读会话文件（`main.rs::read_auth_token` 的纯逻辑部分，便于单测传入临时路径）。
+///
+/// 返回 `Err` 仅代表 I/O 读失败（文件在但读不动），其余情况都落在 `SessionRead` 三态里。
+pub(crate) fn read_session_file(path: &Path) -> Result<SessionRead, String> {
+    // 「文件不存在」= 从未登录 / 已登出，不是旧格式，不能触发重登提示。
+    if !path.exists() {
+        return Ok(SessionRead::None);
+    }
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("读取会话文件失败：{e}"))?;
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        // 损坏文件同样恢复不出会话，留着只会每次启动重复失败——并入同一套处置路径。
+        return Ok(reject_session(path, "会话文件格式损坏"));
+    };
+    Ok(read_token_field(path, &value))
+}
 
 #[cfg(windows)]
 mod imp {
@@ -326,3 +408,203 @@ mod imp {
 
 #[cfg(windows)]
 pub(crate) use imp::{decrypt_token, encrypt_token, harden_file_acl};
+
+#[cfg(test)]
+mod session_file_tests {
+    use super::*;
+
+    /// 每个用例一份独立临时文件（测试并行执行，不能共用路径）。
+    fn temp_path(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "lf_session_{tag}_{}_{nanos}.json",
+            std::process::id()
+        ))
+    }
+
+    /// 不带 entropy 的 DPAPI 加密 = P1-6 之前的旧格式，也是同用户其他进程能自行造出的格式。
+    #[cfg(windows)]
+    fn protect_without_entropy(plain: &[u8]) -> String {
+        use base64::engine::general_purpose::STANDARD as B64;
+        use base64::Engine;
+        use windows_sys::Win32::Foundation::{LocalFree, HLOCAL};
+        use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
+
+        let in_blob = CRYPT_INTEGER_BLOB {
+            cbData: plain.len() as u32,
+            pbData: plain.as_ptr() as *mut u8,
+        };
+        let mut out_blob = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: std::ptr::null_mut(),
+        };
+        let ok = unsafe {
+            CryptProtectData(
+                &in_blob,
+                std::ptr::null(),
+                std::ptr::null(), // 关键：不带 entropy
+                std::ptr::null(),
+                std::ptr::null(),
+                0x1, // CRYPTPROTECT_UI_FORBIDDEN
+                &mut out_blob,
+            )
+        };
+        assert_ne!(ok, 0, "构造旧格式密文应成功");
+        let raw =
+            unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
+        unsafe {
+            let _ = LocalFree(out_blob.pbData as HLOCAL);
+        }
+        B64.encode(raw)
+    }
+
+    /// NEW-4 反向用例：Windows 上明文 token 必须被拒绝，且文件被清除。
+    /// 修复前此处会走「兼容旧版明文」分支返回伪造 JWT，应用启动即以攻击者身份登录。
+    #[cfg(windows)]
+    #[test]
+    fn windows_rejects_plaintext_token_and_clears_file() {
+        let path = temp_path("plain");
+        std::fs::write(
+            &path,
+            br#"{"token":"eyJhbGciOiJIUzI1NiJ9.forged-admin.sig"}"#,
+        )
+        .expect("写入伪造会话文件");
+
+        let outcome = read_session_file(&path).expect("读取不应返回 I/O 错误");
+        let cleared = !path.exists();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            matches!(outcome, SessionRead::ReauthRequired(_)),
+            "Windows 上明文 token 必须被拒绝，不得恢复出登录态"
+        );
+        assert!(cleared, "被拒绝的会话文件必须被清除");
+    }
+
+    /// 攻击者可能在合法密文旁追加明文字段试图「二选一」命中兜底：整份文件都判篡改。
+    #[cfg(windows)]
+    #[test]
+    fn windows_rejects_plaintext_even_alongside_valid_ciphertext() {
+        let path = temp_path("plain_mixed");
+        let enc = encrypt_token("eyJhbGciOiJIUzI1NiJ9.legit.sig").expect("加密应成功");
+        let body = serde_json::to_vec(&serde_json::json!({
+            "token_enc": enc,
+            "token": "eyJhbGciOiJIUzI1NiJ9.forged-admin.sig",
+        }))
+        .expect("序列化");
+        std::fs::write(&path, body).expect("写入会话文件");
+
+        let outcome = read_session_file(&path).expect("读取不应返回 I/O 错误");
+        let cleared = !path.exists();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            matches!(outcome, SessionRead::ReauthRequired(_)),
+            "混入明文字段的会话文件必须整体拒绝"
+        );
+        assert!(cleared, "被拒绝的会话文件必须被清除");
+    }
+
+    /// P1-6 兼容用例：旧格式（无 entropy）密文解不开 → 触发重登处置 + 清文件。
+    /// 修复前是 Ok(None) 静默登出且文件残留，每次启动重复失败。
+    #[cfg(windows)]
+    #[test]
+    fn windows_rejects_legacy_blob_and_clears_file() {
+        let path = temp_path("legacy");
+        let legacy = protect_without_entropy(b"eyJhbGciOiJIUzI1NiJ9.legacy.sig");
+        let body = serde_json::to_vec(&serde_json::json!({ "token_enc": legacy })).expect("序列化");
+        std::fs::write(&path, body).expect("写入旧格式会话文件");
+
+        let outcome = read_session_file(&path).expect("读取不应返回 I/O 错误");
+        let cleared = !path.exists();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            matches!(outcome, SessionRead::ReauthRequired(_)),
+            "旧格式密文必须触发重新登录处置"
+        );
+        assert!(cleared, "旧格式会话文件必须被清除，避免每次启动重复失败");
+    }
+
+    /// 正向用例：本版写出的 DPAPI 密文照常恢复，且文件不能被误删。
+    #[cfg(windows)]
+    #[test]
+    fn windows_accepts_dpapi_ciphertext_and_keeps_file() {
+        let path = temp_path("ok");
+        let plain = "eyJhbGciOiJIUzI1NiJ9.valid.sig";
+        let enc = encrypt_token(plain).expect("加密应成功");
+        let body = serde_json::to_vec(&serde_json::json!({ "token_enc": enc })).expect("序列化");
+        std::fs::write(&path, body).expect("写入会话文件");
+
+        let outcome = read_session_file(&path).expect("读取不应返回 I/O 错误");
+        let kept = path.exists();
+        let _ = std::fs::remove_file(&path);
+
+        match outcome {
+            SessionRead::Token(t) => assert_eq!(t, plain, "应还原出原 token"),
+            _ => panic!("合法 DPAPI 密文应恢复出会话"),
+        }
+        assert!(kept, "有效会话文件不得被清除");
+    }
+
+    /// 非 Windows：明文兜底保留（机密性由 0600 权限保证）。
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_accepts_plaintext_token() {
+        let path = temp_path("unix_plain");
+        std::fs::write(&path, br#"{"token":"eyJhbGciOiJIUzI1NiJ9.valid.sig"}"#).expect("写会话文件");
+
+        let outcome = read_session_file(&path).expect("读取不应返回 I/O 错误");
+        let _ = std::fs::remove_file(&path);
+
+        match outcome {
+            SessionRead::Token(t) => assert_eq!(t, "eyJhbGciOiJIUzI1NiJ9.valid.sig"),
+            _ => panic!("Unix 上明文 token 应继续被接受"),
+        }
+    }
+
+    /// 文件不存在只是「没登录」，不得被当成旧格式触发重登提示。
+    #[test]
+    fn missing_file_is_plain_no_session() {
+        let path = temp_path("missing");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            matches!(read_session_file(&path), Ok(SessionRead::None)),
+            "文件不存在应判为无会话"
+        );
+    }
+
+    /// 合法 JSON 但没有任何 token 字段：无会话，也不该被清掉（同样不是旧格式）。
+    #[test]
+    fn empty_object_is_no_session_and_file_kept() {
+        let path = temp_path("empty_obj");
+        std::fs::write(&path, b"{}").expect("写会话文件");
+
+        let outcome = read_session_file(&path).expect("读取不应返回 I/O 错误");
+        let kept = path.exists();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(matches!(outcome, SessionRead::None), "空对象应判为无会话");
+        assert!(kept, "无 token 字段的文件不应被误判成旧格式而清除");
+    }
+
+    /// 损坏文件并入同一套处置：清文件 + 要求重登。
+    #[test]
+    fn corrupted_file_triggers_reauth_and_clears_file() {
+        let path = temp_path("corrupt");
+        std::fs::write(&path, b"{not json").expect("写会话文件");
+
+        let outcome = read_session_file(&path).expect("读取不应返回 I/O 错误");
+        let cleared = !path.exists();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            matches!(outcome, SessionRead::ReauthRequired(_)),
+            "损坏文件应触发重新登录处置"
+        );
+        assert!(cleared, "损坏的会话文件必须被清除");
+    }
+}
