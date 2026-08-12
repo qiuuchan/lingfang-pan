@@ -71,6 +71,13 @@ done
 TS="$(date +%Y%m%d-%H%M%S)"
 DOW="$(date +%u)"      # 1=周一 .. 7=周日
 DOM="$(date +%d)"      # 日（用于月轮转判定：每月 1 号做月备）
+# 轮转分级标识：周一备份追加 -wk（周备）、每月 1 号追加 -mo（月备），可同时命中。
+# 分级目录名形如 20260812-091500-wk / 20260812-091500-mo / 20260812-091500-wk-mo，
+# 修剪脚本按后缀分别执行日/周/月保留策略（无标识即纯日备）。
+MARKER=""
+[[ "$DOW" == "1" ]] && MARKER="${MARKER}-wk"
+[[ "$DOM" == "01" ]] && MARKER="${MARKER}-mo"
+TS="$(date +%Y%m%d-%H%M%S)${MARKER}"
 RUN_DIR="${BACKUP_ROOT}/${TS}"
 DB_NAME="$(echo "$DB_URL" | sed -E 's#.*/([^?]+).*#\1#')"
 
@@ -141,33 +148,35 @@ EOF
 # 5) 轮转（按天/周/月保留）
 # ---------------------------------------------------------------------------
 prune_by_keep() {
-  local pattern="$1" keep="$2" label="$3"
-  local dirs
+  local pattern="$1" keep="$2" label="$3" exclude_marked="$4"
+  local dirs count excess d
   # 用 find 避免 ls 在 0 匹配时返回非零（否则 set -e 会误杀脚本）
   dirs=$(find "$BACKUP_ROOT" -maxdepth 1 -type d -name "$pattern" 2>/dev/null | sort -r)
-  local count
+  if [[ "$exclude_marked" == "--exclude-marked" ]]; then
+    # 日备不修剪已升格为周/月备的目录（-wk / -mo 后缀），由对应分级策略管理
+    dirs=$(printf '%s\n' "$dirs" | grep -vE -- '-(wk|mo)(-|$)' || true)
+  fi
   count=$(printf '%s\n' "$dirs" | grep -c . || true)
   if [[ "$count" -gt "$keep" ]]; then
-    local excess
     excess=$((count - keep))
-    echo "$dirs" | tail -n "$excess" | while read -r d; do
+    printf '%s\n' "$dirs" | tail -n "$excess" | while read -r d; do
       echo "[backup-pg]   轮转清理(${label}): ${d}"
       rm -rf "$d"
     done
   fi
 }
 
-# 日备：全部 YYYYMMDD-* 目录，保留 KEEP_DAILY
-prune_by_keep '[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*' "$KEEP_DAILY" "daily"
+# 日备：全量日期目录，保 KEEP_DAILY；但排除已升格为周备/月备的目录（由各自分级修剪管）
+prune_by_keep '[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*' "$KEEP_DAILY" "daily" --exclude-marked
 
-# 周备：周一(DOW==1)的备份升级保留
+# 周备：周一（-wk 后缀）备目录，保 KEEP_WEEKLY
 if [[ "$DOW" == "1" ]]; then
-  prune_by_keep '[0-9]*-Mon-*' "$KEEP_WEEKLY" "weekly"
+  prune_by_keep '[0-9]*-wk*' "$KEEP_WEEKLY" "weekly"
 fi
 
-# 月备：每月 1 号的备份升级保留
+# 月备：每月 1 号（-mo 后缀）备目录，保 KEEP_MONTHLY
 if [[ "$DOM" == "01" ]]; then
-  prune_by_keep '[0-9]*-M01-*' "$KEEP_MONTHLY" "monthly"
+  prune_by_keep '[0-9]*-mo*' "$KEEP_MONTHLY" "monthly"
 fi
 
 # ---------------------------------------------------------------------------
