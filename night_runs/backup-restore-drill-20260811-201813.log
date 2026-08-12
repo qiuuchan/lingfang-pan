@@ -1,0 +1,57 @@
+================================================================
+LingFang 备份/恢复演练记录 (T4 P2-5)
+生成时间: Tue Aug 11 20:18:13     2026
+执行方: Agent A4 (本会话)
+环境: 本地 PG16.14 二进制 (D:/lf-pan/pg/pgsql/bin)，隔离演练库 127.0.0.1:5444/lingfang_collab
+数据目录: D:/lf-pan/pg/drill (与任何现存库隔离，演练后清理)
+================================================================
+
+### 1) 起库 (initdb + 启动)
+  initdb -D drill/data -U lingfang -A trust --encoding=UTF8 --locale=C  -> OK
+  pg_ctl start -o '-p 5444 -c listen_addresses=127.0.0.1'             -> 接受连接
+
+### 2) 建库 + 迁移 + seed
+  createdb lingfang_collab                                            -> OK
+  pnpm -C apps/collab-api prisma:deploy                               -> All migrations applied (56)
+  seeds (admin/rbac/billing/releases)                                -> OK
+  drill-seed.ts (team/user/wallet/walletTx/pkg/release/teamCredit/creditLedger) -> 8 行业务数据
+
+### 3) 已知良好基线 (key table counts)
+  Wallet=1 WalletTransaction=1 PluginPackage=1 PluginRelease=1
+  Team=1 User=1 Role=1 CreditLedger=1 TeamCredit=1 _prisma_migrations=56
+
+### 4) 备份 (scripts/backup-pg.sh)
+  bash scripts/backup-pg.sh --db-url ... --backup-root ./backups --artifact-root ./storage
+  产物: lingfang_collab.dump (276K) + globals.sql + artifacts-manifest.txt + backup-meta.txt
+  退出码: 0
+
+### 5) 破坏 (scripts/drill-corrupt.sql)
+  注入 WalletTransaction 注水行 (DRILL_INJECTED_BAD, +999999)          -> WalletTransaction 1->2
+  注入 CreditLedger 注水行 (DRILL_INJECTED_BAD, +888888)              -> CreditLedger 1->2
+  DELETE FROM PluginRelease                                          -> PluginRelease 1->0
+  DELETE FROM Wallet                                                -> Wallet 1->0
+
+### 6) 恢复 (pg_restore)
+  pg_restore -Fc --clean --if-exists --no-owner -d <URL> <dump>      -> 退出码 0
+  恢复后 counts 全部回到已知良好基线; 注水行已清除
+
+### 7) 反向断言校验 (scripts/drill-verify.sh)
+  GREEN 用例 (恢复后): 所有表 = 期望行数, 注水流水=0  -> 退出码 0 (绿)
+  RED 用例 (模拟恢复不完整: 残留注水行 + PluginRelease 漏恢复):
+     表 WalletTransaction 期望=1 实际=2  -> 失败
+     表 PluginRelease 期望=1 实际=0      -> 失败
+     反向断言: 注水流水残留 1 行          -> 失败
+     结论: 红, 退出码 1 (非零, 不静默成功)
+
+### 8) 闭环周期验证 (绿->破坏->红->恢复->绿)
+  corrupt -> drill-verify 红(1) -> restore -> drill-verify 绿(0)    -> 全链路闭环
+
+### 9) 正向断言
+  prisma migrate status -> Database schema is up to date! (56 migrations)
+  drill-verify 绿 (行数一致 + 污染清除)
+
+### 10) 结论
+  [x] 实际恢复演练闭环 (备份->破坏->恢复->校验), 反向断言成立, 未虚报。
+  说明: verify-all.mjs/smoke.mjs 需运行中的 collab-api+Redis 集成栈，
+        超出隔离 PG 演练范围；其作为应用层恢复后验证步骤已写入 runbook §5，待集成环境实跑。
+================================================================
