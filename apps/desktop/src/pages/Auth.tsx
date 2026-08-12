@@ -31,6 +31,11 @@ export function Auth() {
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // P0-8 注册协议同意态 + 服务端当前协议版本（来自 /api/platform-info.agreementVersions.user）。
+  // 未勾选同意时禁用注册提交；请求携带 agreementVersion 供服务端 fail-closed 比对。
+  const [agreedAgreement, setAgreedAgreement] = useState(false);
+  const [agreementVersion, setAgreementVersion] = useState('v1');
+
   // 找回密码（Top5）：「忘记密码」对话框 + 「重置密码」对话框。
   // reset_token 从邮件链接的 URL query 解析（?reset_token=xxx），存在则自动打开重置密码对话框。
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -52,6 +57,8 @@ export function Auth() {
       .then((info) => {
         // 云同步平台名：后端 platformName（缺省 '灵坊工作台'），用于登录页标题展示。
         setPlatformName((info.platformName || '').trim());
+        // P0-8 注册协议版本：取服务端当前生效版本（缺省 v1），注册请求须携带以通过后端校验。
+        setAgreementVersion(info.agreementVersions?.user || 'v1');
       })
       .catch(() => {
         /* 拉取失败不阻断登录（开发态后端可能未实现该端点的旧版本） */
@@ -149,6 +156,7 @@ export function Auth() {
     if (!isEmail(email)) return toast.error('邮箱格式不正确（如 name@example.com）');
     if (password.length < 8) return toast.error('密码至少 8 位');
     if (wantsTeamAdmin && !teamName.trim()) return toast.error('填写要申请管理的团队名称');
+    if (!agreedAgreement) return toast.error('请先阅读并同意《用户协议》《隐私政策》');
     setLoading(true);
     try {
       const r = await api<CollabSessionResponse>('/api/auth/register', {
@@ -161,6 +169,7 @@ export function Auth() {
           wantsTeamAdmin,
           teamName: teamName.trim(),
           reason: reason.trim(),
+          agreementVersion,
         },
       });
       toast.success(
@@ -246,9 +255,30 @@ export function Auth() {
                   />
                 </div>
               )}
+              {/* P0-8 注册协议勾选：默认不勾选；未勾选时禁用注册提交。版本号取自服务端 agreementVersions.user。 */}
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+                <Checkbox
+                  checked={agreedAgreement}
+                  onCheckedChange={(v) => setAgreedAgreement(v === true)}
+                />
+                我已阅读并同意
+                <a
+                  href="#"
+                  onClick={(e) => e.preventDefault()}
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  《用户协议》
+                </a>
+                、《隐私政策》（v{agreementVersion}）
+              </label>
             </div>
           </div>
-          <LoadingButton className="w-full" loading={loading} onClick={submit}>
+          <LoadingButton
+            className="w-full"
+            loading={loading}
+            disabled={mode === 'register' && !agreedAgreement}
+            onClick={submit}
+          >
             {mode === 'login' ? '登录' : '注册'}
           </LoadingButton>
           <div className="flex items-center justify-between">

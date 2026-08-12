@@ -20,7 +20,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { errorMessage } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
+import type { PlatformInfo } from '@/lib/types';
 import { hasPermission } from '@/lib/permissions';
 import {
   DEFAULT_SOURCE_LABELS,
@@ -167,6 +168,22 @@ export function PublishPluginDialog({
   const [publishState, setPublishState] = useState<PluginPublishState>(() => createPluginPublishState(defaultTarget === 'market' ? 'marketplace' : 'team'));
   const wasOpen = useRef(false);
   const notifiedReleaseId = useRef<string | null>(null);
+  // P0-8 插件上传协议版本：从 /api/platform-info.agreementVersions.pluginUpload 取当前生效版本，
+  // 随上传请求携带，供服务端 fail-closed 比对（localStorage 同意态可伪造，以服务端校验为准）。
+  const [pluginUploadVersion, setPluginUploadVersion] = useState('v1');
+  useEffect(() => {
+    let alive = true;
+    api<PlatformInfo>('/api/platform-info', { auth: false, method: 'GET' })
+      .then((info) => {
+        if (alive) setPluginUploadVersion(info.agreementVersions?.pluginUpload || 'v1');
+      })
+      .catch(() => {
+        /* 拉取失败用默认 v1，服务端仍会比对并拒绝旧版本 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const artifactReady = inputMode !== 'artifact' || Boolean(summary);
   const canPublish = canUpload && artifactReady && (target !== 'market' || canSubmitMarket);
@@ -369,12 +386,13 @@ export function PublishPluginDialog({
               sourceKind,
               sourceLabel: sourceLabel.trim(),
               adaptationReportId: adaptReportId,
+              agreementVersion: pluginUploadVersion,
             }, progressHandler);
           }
           const nextWorkspace = workspace || (onPrepareWorkspace ? await onPrepareWorkspace() : null);
           if (!nextWorkspace) throw new Error('当前没有可发布的草稿工作区');
           setWorkspace(nextWorkspace);
-          return publishDraftWorkspace(nextWorkspace, progressHandler, { sourceKind, sourceLabel: sourceLabel.trim(), adaptationReportId: adaptReportId });
+          return publishDraftWorkspace(nextWorkspace, progressHandler, { sourceKind, sourceLabel: sourceLabel.trim(), adaptationReportId: adaptReportId, agreementVersion: pluginUploadVersion });
         },
       });
       setPublishState(nextState);

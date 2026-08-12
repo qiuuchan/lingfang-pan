@@ -482,7 +482,11 @@ describe('AuthService 找回密码 + 重置密码', () => {
         displayName: 'New',
       });
 
-      const result = await service.register({ email: 'new@b.com', password: 'newpass1234' });
+      const result = await service.register({
+        email: 'new@b.com',
+        password: 'newpass1234',
+        agreementVersion: 'v1',
+      });
       expect(result.user.id).toBe('new-user');
       // 注册审计 action=auth.register（事务内 tx.auditLog.create）。
       expect(prisma.auditLog.create).toHaveBeenCalledWith(
@@ -516,6 +520,7 @@ describe('AuthService 找回密码 + 重置密码', () => {
         password: 'newpass1234',
         wantsTeamAdmin: true,
         teamName: '我的团队',
+        agreementVersion: 'v1',
       });
       // 团队管理员申请审计 action=team_admin_application.created。
       expect(prisma.auditLog.create).toHaveBeenCalledWith(
@@ -656,7 +661,11 @@ describe('AuthService 找回密码 + 重置密码', () => {
         email: 'new@b.com',
         displayName: 'New',
       });
-      const result = await service.register({ email: 'new@b.com', password: 'newpass1234' });
+      const result = await service.register({
+        email: 'new@b.com',
+        password: 'newpass1234',
+        agreementVersion: 'v1',
+      });
       expect(result.user.id).toBe('new-user');
       expect(geetest.isSceneEnabled).not.toHaveBeenCalled();
       expect(geetest.validate).not.toHaveBeenCalled();
@@ -919,5 +928,86 @@ describe('AuthService 找回密码 + 重置密码', () => {
         tokenVersion: 4,
       });
     });
+  });
+});
+
+describe('AuthService register agreementVersion 留痕（P0-8）', () => {
+  let prisma: ReturnType<typeof mockPrisma>;
+  let mail: ReturnType<typeof mockMail>;
+  let geetest: ReturnType<typeof mockGeetest>;
+  let service: AuthService;
+
+  beforeEach(() => {
+    prisma = mockPrisma();
+    mail = mockMail();
+    geetest = mockGeetest();
+    // @ts-expect-error mock 不实现完整 PrismaService 接口，仅测用到的方法。
+    service = new AuthService(prisma, mail, geetest);
+  });
+
+  // 公共基线：platformSetting 未配 agreementVersions → 解析回退 {user:'v1',pluginUpload:'v1'}。
+  it('未提供 agreementVersion（空串）被 DTO 拒后，service 仍 fail-closed 拒绝注册', async () => {
+    // 直接以空串调用 service（绕过 DTO），验证服务端自身不放行。
+    await expect(
+      service.register({
+        email: 'new@b.com',
+        password: 'password123',
+        agreementVersion: '',
+      })
+    ).rejects.toThrow();
+    // 拒绝路径不得创建用户 / 不得下发 session。
+    expect(prisma.__tx.user.create).not.toHaveBeenCalled();
+  });
+
+  it('agreementVersion 与服务端当前版本不符抛 badRequest 且不创建用户', async () => {
+    // 服务端默认版本 v1；客户端携带过旧/伪造版本 v0 → 必须被拒。
+    await expect(
+      service.register({
+        email: 'new@b.com',
+        password: 'password123',
+        agreementVersion: 'v0',
+      })
+    ).rejects.toThrow(/版本不符/);
+    expect(prisma.__tx.user.create).not.toHaveBeenCalled();
+    expect(prisma.__tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('agreementVersions 配置为 v2 时旧版本 v1 仍被拒（新版失效旧版）', async () => {
+    prisma.platformSetting.findMany.mockResolvedValue([
+      { key: 'agreementVersions', value: JSON.stringify({ user: 'v2', pluginUpload: 'v2' }) },
+    ]);
+    await expect(
+      service.register({
+        email: 'new@b.com',
+        password: 'password123',
+        agreementVersion: 'v1',
+      })
+    ).rejects.toThrow(/版本不符/);
+    expect(prisma.__tx.user.create).not.toHaveBeenCalled();
+  });
+
+  it('合法版本注册成功且 auth.register 审计 metadata 含 agreementVersion', async () => {
+    // 隔离 session/邮件副作用，聚焦版本校验 + 审计留痕。
+    vi.spyOn(service, 'sessionFor').mockResolvedValue({ token: 't', user: {} } as never);
+    vi.spyOn(service as unknown as { sendVerificationEmail: unknown }, 'sendVerificationEmail').mockResolvedValue(
+      undefined
+    );
+    // 默认服务端版本 v1，客户端携带 v1。
+    prisma.__tx.user.create.mockResolvedValueOnce({ id: 'u-new', email: 'new@b.com', displayName: 'new@b.com' });
+    const session = await service.register({
+      email: 'new@b.com',
+      password: 'password123',
+      agreementVersion: 'v1',
+    });
+    expect(session).toBeTruthy();
+    // 审计必须记录同意版本（服务端留痕可举证）。
+    expect(prisma.__tx.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'auth.register',
+          metadata: expect.objectContaining({ agreementVersion: 'v1' }),
+        }),
+      })
+    );
   });
 });

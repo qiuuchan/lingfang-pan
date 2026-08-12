@@ -27,6 +27,9 @@ const CLIENT_HEADER: HeaderName = HeaderName::from_static("x-client");
 /// 发布时只带 id）。服务端据此赎回存储的报告并落库，避免大体积中文报告塞进 ASCII 受限的 HTTP 头。
 const ADAPTATION_REPORT_ID_HEADER: HeaderName =
     HeaderName::from_static("x-adaptation-report-id");
+/// P0-8 插件上传协议版本：客户端携带与服务端 agreementVersions.pluginUpload 一致的版本，
+/// 缺失/旧版本时服务端 fail-closed 拒绝（localStorage 同意态可伪造，故以服务端校验为准）。
+const AGREEMENT_VERSION_HEADER: HeaderName = HeaderName::from_static("x-agreement-version");
 
 fn resolve_provenance(
     source_kind: Option<PluginReleaseSourceKind>,
@@ -44,6 +47,7 @@ fn artifact_upload_headers(
     package_id: Option<&str>,
     provenance: &ReleaseProvenance,
     adaptation_report_id: Option<&str>,
+    agreement_version: Option<&str>,
 ) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -83,6 +87,17 @@ fn artifact_upload_headers(
                 .map_err(|error| format!("适配报告 id 无法写入请求头：{error}"))?,
         );
     }
+    // P0-8 协议版本：服务端据此 fail-closed 比对；缺失/旧版本直接拒绝（见 plugin-registry.service）。
+    if let Some(version) = agreement_version
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        headers.insert(
+            AGREEMENT_VERSION_HEADER,
+            HeaderValue::from_str(version)
+                .map_err(|error| format!("协议版本无法写入请求头：{error}"))?,
+        );
+    }
     Ok(headers)
 }
 
@@ -93,6 +108,7 @@ async fn upload_artifact_file(
     package_id: Option<&str>,
     provenance: &ReleaseProvenance,
     adaptation_report_id: Option<&str>,
+    agreement_version: Option<&str>,
     on_event: Channel<PackageTransferEvent>,
 ) -> Result<Value, String> {
     let total_bytes = fs::metadata(path)
@@ -121,7 +137,13 @@ async fn upload_artifact_file(
             }
         }
     });
-    let headers = artifact_upload_headers(total_bytes, package_id, provenance, adaptation_report_id)?;
+    let headers = artifact_upload_headers(
+        total_bytes,
+        package_id,
+        provenance,
+        adaptation_report_id,
+        agreement_version,
+    )?;
     let url = format!(
         "{}/api/plugin-registry/releases",
         api_base.trim_end_matches('/')
@@ -355,6 +377,7 @@ pub(crate) async fn publish_draft_workspace(
         input.package_id.as_deref(),
         &provenance,
         input.adaptation_report_id.as_deref(),
+        input.agreement_version.as_deref(),
         on_event.clone(),
     )
     .await?;
@@ -400,6 +423,7 @@ pub(crate) async fn publish_local_artifact(
         input.package_id.as_deref(),
         &provenance,
         input.adaptation_report_id.as_deref(),
+        input.agreement_version.as_deref(),
         on_event.clone(),
     )
     .await?;
@@ -424,7 +448,7 @@ mod tests {
             Some("Cursor 工作区"),
         )
         .unwrap();
-        let headers = artifact_upload_headers(42, Some("package-1"), &provenance, None).unwrap();
+        let headers = artifact_upload_headers(42, Some("package-1"), &provenance, None, None).unwrap();
         assert_eq!(headers.get(CLIENT_HEADER).unwrap(), "desktop");
         assert_eq!(headers.get(SOURCE_KIND_HEADER).unwrap(), "EXTERNAL_TOOL");
         assert_eq!(headers.get(PACKAGE_ID_HEADER).unwrap(), "package-1");
@@ -432,6 +456,23 @@ mod tests {
         let encoded = headers.get(SOURCE_LABEL_HEADER).unwrap().to_str().unwrap();
         let decoded = general_purpose::URL_SAFE_NO_PAD.decode(encoded).unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), "Cursor 工作区");
+    }
+
+    #[test]
+    fn artifact_upload_headers_include_agreement_version_when_provided() {
+        // P0-8 反向/正向用例：提供协议版本时写入 x-agreement-version；缺失时不写入。
+        let provenance = normalize_release_provenance(
+            PluginReleaseSourceKind::LocalArtifact,
+            Some("本地制品"),
+        )
+        .unwrap();
+        let with_version =
+            artifact_upload_headers(10, None, &provenance, None, Some("v1")).unwrap();
+        assert_eq!(with_version.get(AGREEMENT_VERSION_HEADER).unwrap(), "v1");
+
+        let without_version =
+            artifact_upload_headers(10, None, &provenance, None, None).unwrap();
+        assert!(without_version.get(AGREEMENT_VERSION_HEADER).is_none());
     }
 
     #[test]
@@ -455,6 +496,7 @@ mod tests {
             source_kind: Some(PluginReleaseSourceKind::LocalArtifact),
             source_label: Some(artifact_path.to_string_lossy().to_string()),
             adaptation_report_id: None,
+            agreement_version: None,
         };
 
         let (prepared_path, inspected, provenance) = prepare_local_artifact(&input).unwrap();

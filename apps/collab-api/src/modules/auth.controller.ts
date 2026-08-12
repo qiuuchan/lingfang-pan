@@ -56,6 +56,7 @@ export class AuthController {
       wantsTeamAdmin: body.wantsTeamAdmin,
       teamName: body.teamName,
       reason: body.reason,
+      agreementVersion: body.agreementVersion,
     });
   }
 

@@ -30,6 +30,7 @@ import {
   type ArtifactStore,
 } from './artifact-store';
 import { AuthService } from './auth.service';
+import { parseAgreementVersions } from './settings.service';
 import { PLUGIN_AI_POLICY_VERSION } from './plugin-ai-policy';
 import { assertPluginAiPolicy } from './plugin-ai-policy-enforcement';
 import { checkPluginAiPolicy, type PluginAiPolicyFile } from './plugin-ai-policy';
@@ -476,14 +477,35 @@ export class PluginRegistryService {
     return { report: row.report, status: normalizeStoredAdaptationStatus(row.status) };
   }
 
+  /** P0-8 插件上传协议版本源：读 PlatformSetting.agreementVersions 经 parseAgreementVersions 解析。
+   *  与注册校验同策略：读异常直接上抛（不静默回退默认），避免「读库失败→用默认放行旧版本」旁路。 */
+  private async getAgreementVersions(): Promise<{ user: string; pluginUpload: string }> {
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: 'agreementVersions' },
+      select: { key: true, value: true },
+    });
+    const raw = rows[0]?.value ?? null;
+    return parseAgreementVersions(raw);
+  }
+
   async publishTeamRelease(
     userId: string,
     stream: Readable,
     packageId?: string,
     contentLength?: number,
-    sourceHeaders: ReleaseSourceHeaders = {}
+    sourceHeaders: ReleaseSourceHeaders = {},
+    agreementVersion?: string
   ) {
     const membership = await this.auth.ensureCurrentTeam(userId);
+    // P0-8 插件上传协议 fail-closed：客户端须携带与服务端当前 agreementVersions.pluginUpload 一致的版本。
+    // 缺失（前端未带）或版本不符 → 400 拒绝，不接收流、不发布。localStorage 同意态仅客户端展示用，
+    // 伪造/缺失即等同于「服务端收到缺失/旧版本」→ 此处拒。
+    const currentVersions = await this.getAgreementVersions();
+    if (agreementVersion !== currentVersions.pluginUpload) {
+      throw badRequest(
+        `插件上传协议版本不符（客户端 ${agreementVersion || '空'} / 服务端 ${currentVersions.pluginUpload}），请更新至最新版后重新阅读并同意`
+      );
+    }
     // 注意：暂存报告的兑付（消费）推迟到发布事务内、真正落库前才执行——
     // 上传失败 / manifest 不合规 / 权限不足时报告必须保持未消费，否则用户每次重试
     // 都要重新跑一遍适配流水线。CAS（consumedAt=null）语义不变。
@@ -642,6 +664,23 @@ export class PluginRegistryService {
               sizeBytes: staged.sizeBytes,
               sourceKind: source.sourceKind,
               sourceLabel: source.sourceLabel,
+              ingestChannel: source.ingestChannel,
+            },
+          },
+        });
+        // P0-8 插件上传服务端留痕：即便桌面端 localStorage 同意态可被伪造，服务端以本次携带的
+        // agreementVersion 落 audit（plugin.uploaded，此前为死标签），使「已获有效协议授权」可举证。
+        await tx.auditLog.create({
+          data: {
+            actorUserId: userId,
+            action: 'plugin.uploaded',
+            targetType: 'PluginRelease',
+            targetId: created.id,
+            metadata: {
+              packageId: pkg!.id,
+              version: created.version,
+              agreementVersion: agreementVersion ?? currentVersions.pluginUpload,
+              sourceKind: source.sourceKind,
               ingestChannel: source.ingestChannel,
             },
           },

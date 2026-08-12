@@ -194,8 +194,9 @@ describe('SettingsService', () => {
     expect(gitee.invalidateChangelogCache).not.toHaveBeenCalled();
   });
 
-  it('getPublicInfo 仅返回 platformName/logoUrl/geetestCaptchaId/geetestScenes（缺省兜底）', async () => {
+  it('getPublicInfo 仅返回 platformName/logoUrl/geetestCaptchaId/geetestScenes/agreementVersions（缺省兜底）', async () => {
     // DB 仅有 platformName 一项，logoUrl/geetestCaptchaId/geetestScenes 缺失 → 返回兜底空串。
+    // agreementVersions 缺失 → 回退 DEFAULT_AGREEMENT_VERSIONS（{user:'v1',pluginUpload:'v1'}）。
     prisma.platformSetting.findMany.mockResolvedValue([{ key: 'platformName', value: '灵坊' }]);
     const result = await service.getPublicInfo();
     expect(result).toEqual({
@@ -203,6 +204,7 @@ describe('SettingsService', () => {
       logoUrl: '',
       geetestCaptchaId: '',
       geetestScenes: '',
+      agreementVersions: { user: 'v1', pluginUpload: 'v1' },
     });
     // 关键约束：findMany 的 where 必须限定白名单 key，杜绝查询全表泄漏非公开设置。
     expect(prisma.platformSetting.findMany).toHaveBeenCalledWith({
@@ -219,6 +221,7 @@ describe('SettingsService', () => {
       logoUrl: '',
       geetestCaptchaId: '',
       geetestScenes: '',
+      agreementVersions: { user: 'v1', pluginUpload: 'v1' },
     });
   });
 

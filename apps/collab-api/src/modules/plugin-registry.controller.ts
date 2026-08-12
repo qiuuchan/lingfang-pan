@@ -55,7 +55,8 @@ export class PluginRegistryController {
     @Headers('x-plugin-source-kind') sourceKind?: string,
     @Headers('x-plugin-source-label-b64') sourceLabelBase64?: string,
     @Headers('x-client') client?: string,
-    @Headers('x-adaptation-report-id') adaptationReportId?: string
+    @Headers('x-adaptation-report-id') adaptationReportId?: string,
+    @Headers('x-agreement-version') agreementVersion?: string
   ) {
     return this.registry.publishTeamRelease(
       requireUser(req).id,
@@ -67,7 +68,8 @@ export class PluginRegistryController {
         sourceLabelBase64,
         ingestChannel: client?.trim().toLowerCase() === 'desktop' ? 'DESKTOP' : 'API',
         adaptationReportId,
-      }
+      },
+      agreementVersion
     );
   }
 

@@ -38,7 +38,42 @@ export const PUBLIC_SETTING_KEYS = [
   'logoUrl',
   'geetestCaptchaId',
   'geetestScenes',
+  'agreementVersions',
 ] as const;
+
+/** 协议版本默认源（PlatformSetting 未配置 agreementVersions 时回退）。
+ *  前端（注册页/安装器/插件上传）占位文本硬编码 v1 与此对齐，保证缺省即可比对。
+ *  升版：由平台 Admin 在 agreementVersions 写入新值（如 {user:"v2",pluginUpload:"v2"}），无需改码。 */
+export const DEFAULT_AGREEMENT_VERSIONS = {
+  user: 'v1',
+  pluginUpload: 'v1',
+} as const;
+
+/** 协议版本结构（与 agreementVersions 设置值 JSON shape 一致）。 */
+export interface AgreementVersions {
+  user: string;
+  pluginUpload: string;
+}
+
+/** 解析 agreementVersions 设置值（JSON 字符串）→ 结构化的 {user, pluginUpload}。
+ *  传入空串/非法 JSON/缺字段时回退 DEFAULT_AGREEMENT_VERSIONS，保证读侧永远拿到可比对版本。
+ *  仅供后端 register / 插件上传等校验场景复用，避免各模块重复实现解析逻辑。 */
+export function parseAgreementVersions(raw: string | null | undefined): AgreementVersions {
+  const fallback = { ...DEFAULT_AGREEMENT_VERSIONS };
+  if (!raw) return fallback;
+  try {
+    const obj = JSON.parse(raw) as Partial<AgreementVersions>;
+    return {
+      user: typeof obj.user === 'string' && obj.user ? obj.user : fallback.user,
+      pluginUpload:
+        typeof obj.pluginUpload === 'string' && obj.pluginUpload
+          ? obj.pluginUpload
+          : fallback.pluginUpload,
+    };
+  } catch {
+    return fallback;
+  }
+}
 
 /** 极验场景归一化：当前仅管理端场景生效；兼容旧配置 login/forgot，register 已无对应应用端验证码语义。 */
 function normalizeGeetestScenes(raw: string): string {
@@ -230,7 +265,7 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
       throw badRequest('videoMaxSeconds 必须是 1~3600 的整数（秒）');
     return String(n);
   },
-  // P0-9 AI 内容审核开关：平台级总闸，默认 OFF（代码读侧兜底为 OFF，不可硬编码为 ON）。
+// P0-9 AI 内容审核开关：平台级总闸，默认 OFF（代码读侧兜底为 OFF，不可硬编码为 ON）。
   // 仅 Admin 可配置；非公开字段（不进 PUBLIC_SETTING_KEYS），普通用户不可见。
   // W0 决策挂点：决策 A（外部运营接管）落地后，将此开关语义升为「无条件硬门禁」——
   // 即默认态改 ON、且无任何路径会把它降回 OFF 而静默放行。本仓库仅实现机制，不绑定供应商。
@@ -240,6 +275,29 @@ const KEY_VALIDATORS: Record<string, (raw: string) => string> = {
     if (v !== 'true' && v !== 'false' && v !== '')
       throw badRequest('aiModerationEnabled 仅支持 true / false（或清空回退默认 OFF）');
     return v === 'true' ? 'true' : 'false';
+  },
+  // P0-8 协议版本（注册/插件上传服务端 fail-closed 校验的唯一权威源）。
+  // JSON 结构：{"user":"v1","pluginUpload":"v1"}，user=注册协议版本、pluginUpload=插件上传协议版本。
+  // 两个字段均必填且为非空字符串，版本格式约定 [a-z0-9.]+（如 v1/v1.2），防注入任意字符。
+  // 空值放行（=清空回退 DEFAULT_AGREEMENT_VERSIONS，注册仍强制客户端携带并提交版本比对）。
+  agreementVersions: (raw) => {
+    const v = raw.trim();
+    if (v === '') return v;
+    let obj: unknown;
+    try {
+      obj = JSON.parse(v);
+    } catch {
+      throw badRequest('agreementVersions 必须是合法 JSON');
+    }
+    if (typeof obj !== 'object' || obj === null)
+      throw badRequest('agreementVersions 必须是对象');
+    const { user, pluginUpload } = obj as Record<string, unknown>;
+    const verRe = /^[a-z0-9.]+$/;
+    if (typeof user !== 'string' || !user || !verRe.test(user))
+      throw badRequest('agreementVersions.user 必须是非空版本串（[a-z0-9.]+）');
+    if (typeof pluginUpload !== 'string' || !pluginUpload || !verRe.test(pluginUpload))
+      throw badRequest('agreementVersions.pluginUpload 必须是非空版本串（[a-z0-9.]+）');
+    return v;
   },
 };
 
@@ -421,6 +479,9 @@ export class SettingsService {
         // 组C 场景开关：geetestScenes 公开（前端按场景决定是否渲染/强制验证码，与后端 admin 场景语义一致）。
         // 缺省空串=全部场景关闭（即便配了 captchaId 也不强制）。
         geetestScenes: normalizeGeetestScenes(map.get('geetestScenes') ?? ''),
+        // P0-8 协议版本：前端注册页/安装器/插件上传页据此渲染版本号并随请求携带，供服务端 fail-closed 比对。
+        // 未配置时回退 DEFAULT_AGREEMENT_VERSIONS（保证缺省即可比对，前端占位文本 v1 对齐）。
+        agreementVersions: parseAgreementVersions(map.get('agreementVersions')),
       };
     });
   }

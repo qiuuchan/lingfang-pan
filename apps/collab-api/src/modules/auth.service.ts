@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma.service';
 import { badRequest, conflict, forbidden, unauthorized } from '../common';
 import { MailService } from './mail.service';
 import { GeetestService, type GeetestCaptchaParams, type GeetestScene } from './geetest.service';
+import { parseAgreementVersions } from './settings.service';
 export type OnboardingState =
   | 'NEEDS_INVITATION'
   | 'PENDING_APPROVAL'
@@ -59,12 +60,21 @@ export class AuthService {
     wantsTeamAdmin?: boolean;
     teamName?: string;
     reason?: string;
+    agreementVersion: string;
   }) {
     const email = input.email?.trim().toLowerCase();
     // 邮箱格式与密码长度校验已下沉到 RegisterDto（@IsEmail / @MinLength(8)），
     // 此前重复的手动校验移除以保持单一来源；归一化 trim/lowercase 保留。
     const exists = await this.prisma.user.findUnique({ where: { email } });
     if (exists) throw conflict('该邮箱已注册');
+    // P0-8 注册协议 fail-closed：客户端须携带与服务端当前 agreementVersions.user 一致的版本。
+    // 缺失（DTO 已拦截空串）或版本不符 → 400 拒绝，不创建用户、不下发 session。
+    const currentVersions = await this.getAgreementVersions();
+    if (input.agreementVersion !== currentVersions.user) {
+      throw badRequest(
+        `用户协议版本不符（客户端 ${input.agreementVersion || '空'} / 服务端 ${currentVersions.user}），请更新至最新版后重新阅读并同意`
+      );
+    }
     const passwordHash = await bcrypt.hash(input.password, 12);
     // 修复 AUTH-03：此前 user.create 与 teamAdminApplication.create/audit 非原子，
     // application.create 失败会留孤儿 user。包进事务保证一致性。
@@ -77,13 +87,14 @@ export class AuthService {
         },
       });
       // 注册审计：actor=新用户自身，targetType=User（与 team_admin_application.created 事务内并列）。
+      // P0-8 留痕：metadata 记录用户同意的协议版本，便于服务端举证「注册时已获有效授权」。
       await tx.auditLog.create({
         data: {
           actorUserId: user.id,
           action: 'auth.register',
           targetType: 'User',
           targetId: user.id,
-          metadata: { email },
+          metadata: { email, agreementVersion: input.agreementVersion },
         },
       });
       if (input.wantsTeamAdmin) {
@@ -271,6 +282,18 @@ export class AuthService {
       // PlatformSetting 读取失败降级为默认值，登录主流程不中断（容灾优先于精确阈值）。
       return defaults;
     }
+  }
+
+  /** P0-8 注册协议版本源：读 PlatformSetting.agreementVersions 并经 parseAgreementVersions 解析。
+   *  该读不参与注册主流程容灾降级——版本不符必须 fail-closed 拒绝（安全优先于可用），
+   *  故读取异常直接上抛（不静默回退默认），避免「读库失败→用默认放行旧版本」的旁路。 */
+  private async getAgreementVersions(): Promise<{ user: string; pluginUpload: string }> {
+    const rows = await this.prisma.platformSetting.findMany({
+      where: { key: 'agreementVersions' },
+      select: { key: true, value: true },
+    });
+    const raw = rows[0]?.value ?? null;
+    return parseAgreementVersions(raw);
   }
 
   /** 组B：将 lockedUntil 折算为向上取整的剩余分钟数（最少 1，避免提示「0 分钟」误导）。 */

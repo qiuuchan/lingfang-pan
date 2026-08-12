@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsEmail,
+  IsNotEmpty,
   IsOptional,
   IsString,
   MinLength,
@@ -58,6 +59,14 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   reason?: string;
+
+  @ApiProperty({
+    description: '用户协议/隐私政策同意版本（须与服务端当前 agreementVersions.user 一致，缺失或不符将被拒绝）',
+    example: 'v1',
+  })
+  @IsString()
+  @IsNotEmpty({ message: '请先阅读并同意《用户协议》《隐私政策》' })
+  agreementVersion!: string;
 }
 
 /** 应用端登录请求体 DTO。 */

@@ -1380,6 +1380,62 @@ describe('PluginRegistryService', () => {
   });
 });
 
+describe('PluginRegistryService 插件上传协议版本校验（P0-8）', () => {
+  // 协议版本检查位于 publishTeamRelease 入口（ensureCurrentTeam 之后、spoolUpload 之前），
+  // 缺失/不符直接抛 bad_request 且不进入上传事务。
+  function registryWithVersion(version: { user: string; pluginUpload: string } | null) {
+    const platformSetting = {
+      findMany: vi.fn(async () =>
+        version
+          ? [{ key: 'agreementVersions', value: JSON.stringify(version) }]
+          : []
+      ),
+    };
+    // spoolUpload/artifacts 不在此路径被调用（版本检查先抛），mock 仅占位避免未定义。
+    const registry = service(
+      { platformSetting },
+      {
+        ensureCurrentTeam: vi
+          .fn()
+          .mockResolvedValue({ teamId: '22222222-2222-4222-8222-222222222222' }),
+      },
+      { spoolUpload: vi.fn() }
+    );
+    return { registry, platformSetting };
+  }
+
+  const fakeStream = {} as never;
+
+  it('插件上传缺失 agreementVersion 被拒（fail-closed）', async () => {
+    const { registry } = registryWithVersion({ user: 'v1', pluginUpload: 'v1' });
+    await expect(
+      registry.publishTeamRelease('user', fakeStream, undefined, undefined, {}, undefined)
+    ).rejects.toThrow();
+  });
+
+  it('插件上传 agreementVersion 与服务端不符被拒', async () => {
+    const { registry } = registryWithVersion({ user: 'v1', pluginUpload: 'v1' });
+    await expect(
+      registry.publishTeamRelease('user', fakeStream, undefined, undefined, {}, 'v0')
+    ).rejects.toThrow(/版本不符/);
+  });
+
+  it('agreementVersions 配置 v2 时旧版本 v1 仍被拒', async () => {
+    const { registry } = registryWithVersion({ user: 'v2', pluginUpload: 'v2' });
+    await expect(
+      registry.publishTeamRelease('user', fakeStream, undefined, undefined, {}, 'v1')
+    ).rejects.toThrow(/版本不符/);
+  });
+
+  it('合法版本通过版本检查后进入上传流程（不在此路径抛版本错误）', async () => {
+    const { registry } = registryWithVersion({ user: 'v1', pluginUpload: 'v1' });
+    // 版本正确 → 版本检查通过，后续因 spoolUpload 等未完整 mock 而在上传阶段抛其他错（非版本错误）。
+    await expect(
+      registry.publishTeamRelease('user', fakeStream, undefined, undefined, {}, 'v1')
+    ).rejects.not.toThrow(/版本不符/);
+  });
+});
+
 describe('adaptation report staging', () => {
   const teamId = packageRow().ownerTeamId;
 

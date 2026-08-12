@@ -68,6 +68,8 @@ export interface TeamInfo {
 export interface PlatformInfo {
   platformName: string;
   logoUrl: string;
+  /** P0-8 协议版本：注册/插件上传协议当前生效版本（缺省 {user:'v1',pluginUpload:'v1'}）。 */
+  agreementVersions?: { user: string; pluginUpload: string };
 }
 
 /** 公开团队发现页条目（GET /api/teams/public）。 */
