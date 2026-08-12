@@ -339,7 +339,7 @@ async function pipeAnthropicSseAsOpenAi(
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
 
-  const usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0 };
+  const usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0, text: '' };
   const converter = new AnthropicStreamToOpenAi(createdSec);
   const reader = upstream.body?.getReader();
   if (!reader) {
@@ -415,7 +415,7 @@ async function pipeOpenAiSseNormalizingReasoning(
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
 
-  let usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0 };
+  let usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0, text: '' };
   let inThinking = false; // 已发 <think> 未闭合
   const reader = upstream.body?.getReader();
   if (!reader) {
@@ -590,7 +590,7 @@ async function pipeSseAndExtractUsage(
   // 透传 OpenAI/Anthropic 末尾标记，客户端据此知道流结束。
   res.flushHeaders?.();
 
-  let usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0 };
+  let usage: ForwardResult = { inputTokens: 0, outputTokens: 0, images: 0, text: '' };
   const reader = upstream.body?.getReader();
   if (!reader) {
     res.end();
