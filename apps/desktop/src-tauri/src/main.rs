@@ -490,11 +490,17 @@ fn main() {
     // 读 argv，插件就能在宿主运行期间把逃生开关植进来，把 fail-closed 降级成放行。
     process_util::SandboxPolicy::init_argv_snapshot();
 
+    // P3-2：最早期注册 panic hook，崩溃落盘（下次启动上报）。必须排在 builder 之前、
+    // init_argv_snapshot 之后；hook 内部不抛，二次 panic 不会炸进程。
+    process_util::install_panic_hook();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         // 本地定时任务：系统通知（NOTIFY payload + 运行结果推送）。
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            // P3-2：启动早期上报上次崩溃（DSN 已配则投递并删除，否则保留供诊断）。
+            process_util::report_pending_crashes(app.handle());
             // task 06-16 组A：插件持久化目录存储（plugins_root 配置 + 目录定位 + 状态扫描）。
             // 组B 的 start_plugin/stop_plugin 经此 State 的 ensure_plugin_dir 解析插件目录，
             // scan_plugin_status 据此扫文件系统判 ready/incomplete/error + 合并组B 内存进程表判 running。

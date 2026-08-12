@@ -21,7 +21,12 @@ import {
 import { ClientSandboxPreview } from './ClientSandboxPreview';
 import { OwnerQualityPanel } from './OwnerQualityPanel';
 import { WebApiError } from './api';
+import { ErrorBoundary, initSentry, installGlobalHandlers } from './monitoring';
 import './style.css';
+
+// P3-1/P3-2：最早期初始化错误上报（DSN 缺失时 console 兜底，不崩溃）。
+initSentry();
+installGlobalHandlers();
 
 function Markdown({ source }: { source: string }) {
   const blocks = source.replace(/\r\n/g, '\n').split(/\n{2,}/);
@@ -347,6 +352,8 @@ function App() {
 }
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );

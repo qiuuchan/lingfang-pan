@@ -26,6 +26,7 @@
     "@lingfang/contract": "workspace:*",
     "@lingfang/ui-tokens": "workspace:^",
     "@lingfang/workflow-engine": "workspace:*",
+    "@sentry/react": "^10.70.0",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "ai": "^5.0.204",

@@ -10,6 +10,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AppExceptionFilter } from './common';
 import { requireKeyEncryptionKey } from './crypto/credential-cipher';
+import { initSentry, installProcessHandlers } from './monitoring/sentry';
 
 /** 读取 package.json 版本号（与 /api/health 保持单一来源，修复 XCONTRACT-01）。 */
 function readPackageVersion(): string {
@@ -20,6 +21,11 @@ function readPackageVersion(): string {
 }
 
 async function bootstrap() {
+  // P3-1/P3-2：最早期初始化错误上报（DSN 缺失时 console 兜底，不崩溃）。
+  // 必须在 JWT_SECRET fail-fast 校验之前注册，确保启动期异常也能被捕获上报。
+  initSentry();
+  installProcessHandlers();
+
   // 根因修复（AUTH-04 / XSEC-04 / H-5）：JWT_SECRET 缺失、过短或命中已知弱默认值时
   // 启动期 fail-fast（任何环境都拒绝，不再仅 production），杜绝回退到公开默认值
   // 'dev-collab-change-me' 导致任意 token 可伪造。凭证伪造会使全平台失守，

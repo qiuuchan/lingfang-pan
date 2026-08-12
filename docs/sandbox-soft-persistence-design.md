@@ -38,3 +38,33 @@
 
 - `apps/desktop/src-tauri/src/process_util/guarded_spawn.rs`：新增 `#[cfg(windows)]` 枚举函数（参数化以便单测），在 `init_argv_snapshot` 中：若自启动播种为真 → 强制快照 `false`。
 - 单测：用注入的自启动条目向量验证反向①/②与正向。
+
+---
+
+## 追加评审：T8 残留边界 —— `cmd /c` 等启动器包装（2026-08-11）
+
+### 现状缺口
+原 `autostart_seeds_sandbox_soft` 仅校验 `tokens.first()`（即 `entry[0]` 是否为宿主 exe）。
+但攻击者可写 `HKCU\Run` 条目：`cmd /c "C:\Programs\lingfang\lingfang.exe" --sandbox-soft`。
+经 `tokenize_cmdline` 拆分后 token 序列为 `[cmd, /c, "C:\...\lingfang.exe" --sandbox-soft]`，
+宿主 exe 藏在第三 token 的引号子串内，first-token 为 `cmd` → **旧实现漏检**，逃生开关被持久化注入。
+
+### 加固方案（已实施）
+新增纯函数 `unwrap_launcher(tokens)`：当 `tokens[0]` ∈ 已知启动器清单
+（`cmd`/`cmd.exe`/`powershell`/`pwsh`/`wscript`/`cscript`/`rundll32` 等）且 `tokens[1]` 为命令开关
+（`/c`/`-c`/`/k`/`/command` 等）时，把 `tokens[2..]` 拼回原串后**重新分词**，得到内层真实命令行。
+`autostart_seeds_sandbox_soft` 改为：先 `unwrap_launcher`，再扫描内层**所有** token —— 任一 token 经
+`norm_exe` 归一后等于/以宿主 exe 结尾、且条目携带 `--sandbox-soft` → 判为播种。
+
+### 取舍与攻击面
+- **覆盖**：`cmd /c`、`cmd.exe /c`、`powershell -c/-Command`、`wscript`、`rundll32` 等常见 wrapper 全部解包，封堵题目给定残余边界。
+- **误报风险**：仅当「目标疑似宿主 **且** 携带 `--sandbox-soft`」才判播种；`norm_exe` 已做小写/去 `.exe`/去引号归一，
+  并以 `ends_with(host)` 兜底短名与相对路径。`notepad.exe`（目标非宿主）即便带开关也不会误判为宿主播种；
+  宿主条目不带开关（如 `host.exe --other-flag`）同样不触发。正常第三方自启动不被误伤。
+- **保留逃生舱**：手动直启（不在任何自启动条目中）仍由 `sandbox_soft_honored(arg_flag, autostart_seeded)` 正常 honors 开关，与方案 A+C 一致。
+
+### 反向用例（验收，已落单测）
+- `autostart_seeds_sandbox_soft_detects_cmd_c_wrapper`：`cmd /c "host.exe --sandbox-soft"` → 断言 `true`（检出）。
+- `autostart_seeds_sandbox_soft_detects_powershell_wrapper`：`powershell.exe -c "host.exe --sandbox-soft"` → 断言 `true`。
+- 既有 16 用例（含反向①/②与正向直启）全部不回归。
+
