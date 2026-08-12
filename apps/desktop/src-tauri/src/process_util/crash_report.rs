@@ -97,11 +97,24 @@ fn app_data_dir_best_effort() -> Option<PathBuf> {
 /// 成功上报后删除对应文件；上报失败或 DSN 未配则保留。
 pub(crate) fn report_pending_crashes(app: &tauri::AppHandle) {
     let dsn = std::env::var("SENTRY_DSN").unwrap_or_default();
+    // 扫描范围：app_data_dir（正式目录）+ panic hook 降级目录（current_exe()/crashes）。
+    // 二者必须都扫——panic 阶段拿不到 AppHandle，hook 落盘只可能落在降级目录，
+    // 只扫 app_data_dir 会让崩溃文件永久静默滞留（违背「不静默」约束）。
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(d) = app.path().app_data_dir() {
+        dirs.push(d);
+    }
+    if let Some(fallback) = app_data_dir_best_effort() {
+        if !dirs.iter().any(|d| d == &fallback) {
+            dirs.push(fallback);
+        }
+    }
     if dsn.is_empty() {
         // 无 DSN：保留落盘文件供诊断，不静默丢弃（eprintln 提示运维）。
-        if let Ok(dir) = app.path().app_data_dir() {
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                let pending: usize = entries
+        let mut pending = 0usize;
+        for dir in &dirs {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                pending += entries
                     .filter_map(|e| e.ok())
                     .filter(|e| {
                         let n = e.file_name();
@@ -109,38 +122,36 @@ pub(crate) fn report_pending_crashes(app: &tauri::AppHandle) {
                         n.starts_with(CRASH_FILE_PREFIX) && n.ends_with(CRASH_FILE_SUFFIX)
                     })
                     .count();
-                if pending > 0 {
-                    eprintln!(
-                        "[crash-report] 发现 {pending} 个未上报崩溃（SENTRY_DSN 未配置，保留供诊断）"
-                    );
-                }
             }
+        }
+        if pending > 0 {
+            eprintln!(
+                "[crash-report] 发现 {pending} 个未上报崩溃（SENTRY_DSN 未配置，保留供诊断）"
+            );
         }
         return;
     }
 
-    let dir = match app.path().app_data_dir() {
-        Ok(d) => d,
-        Err(_) => return,
-    };
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.filter_map(|e| e.ok()) {
-        let name_os = entry.file_name();
-        let name = name_os.to_string_lossy();
-        if !name.starts_with(CRASH_FILE_PREFIX) || !name.ends_with(CRASH_FILE_SUFFIX) {
-            continue;
-        }
-        let path = entry.path();
-        let body = match std::fs::read_to_string(&path) {
-            Ok(b) => b,
+    for dir in dirs {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
             Err(_) => continue,
         };
-        // POST 到 Sentry store 端点（DSN 解析）。失败保留文件，下次再试。
-        if upload_to_sentry(&dsn, &body) {
-            let _ = std::fs::remove_file(&path);
+        for entry in entries.filter_map(|e| e.ok()) {
+            let name_os = entry.file_name();
+            let name = name_os.to_string_lossy();
+            if !name.starts_with(CRASH_FILE_PREFIX) || !name.ends_with(CRASH_FILE_SUFFIX) {
+                continue;
+            }
+            let path = entry.path();
+            let body = match std::fs::read_to_string(&path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            // POST 到 Sentry store 端点（DSN 解析）。失败保留文件，下次再试。
+            if upload_to_sentry(&dsn, &body) {
+                let _ = std::fs::remove_file(&path);
+            }
         }
     }
 }
@@ -151,7 +162,14 @@ fn upload_to_sentry(dsn: &str, body: &str) -> bool {
         Some(u) => u,
         None => return false,
     };
-    let client = reqwest::blocking::Client::new();
+    // 显式超时：启动期阻塞上报若遇到不可达 DSN，绝不能把应用启动挂死（10s 上限）。
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
     match client
         .post(&parsed)
         .header("Content-Type", "application/json")
