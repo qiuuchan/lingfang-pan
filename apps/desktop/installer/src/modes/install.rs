@@ -186,6 +186,16 @@ impl InstallerApp {
                     .color(theme::TEXT),
             );
         });
+        // Beta 平台限制声明（P1-11）：本安装程序为 Windows 原生 PE，仅支持 Windows x64。
+        // 非 Windows 环境无对应构建产物，故在安装欢迎页明确标注，避免跨平台用户误下载。
+        ui.add_space(6.0);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                egui::RichText::new("Beta 版仅支持 Windows x64")
+                    .size(13.0)
+                    .color(theme::TEXT_MUTED),
+            );
+        });
 
         ui.add_space(40.0);
         ui.vertical_centered(|ui| {

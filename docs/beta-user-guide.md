@@ -7,10 +7,7 @@
 
 ## ⚠️ Beta 平台支持声明（请先读）
 
-> **Beta 阶段仅支持 Windows x64。**
-> 本声明段为骨架，最终文案（精确的系统要求、不支持的平台清单、已知限制措辞）由
-> 《LingFang-工单-Beta推进-AI标识与声明-2026-08-11.md》（Agent A3）落定并回填此处。
-> 在 A3 工单完成前，以下为临时占位，不代表最终对外口径：
+> **Beta 阶段仅支持 Windows x64。** 桌面客户端为 Windows 原生安装包，不提供 macOS / Linux 构建产物；非 Windows 环境暂无法安装与运行。
 >
 > - 支持平台：Windows 10/11 x64
 > - 暂不支持：macOS、Linux、Windows ARM64、移动端

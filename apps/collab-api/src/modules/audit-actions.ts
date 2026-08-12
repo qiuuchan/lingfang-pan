@@ -136,6 +136,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'admin.llm_provider.updated': '更新 LLM Provider',
   'admin.llm_provider.deleted': '删除 LLM Provider',
   'admin.llm_provider.activated': '启用 LLM Provider',
+  // P0-9 AI 内容审核：LLM 输出经审核钩子被拒（命中敏感内容 / 审核服务不可用 fail-closed）时记审计。
+  'admin.llm.content_intercepted': 'AI 内容审核拦截',
   'admin.release.created': '创建版本',
   'admin.release.updated': '更新版本信息',
   'admin.release.published': '发布版本',

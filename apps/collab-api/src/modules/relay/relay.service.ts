@@ -33,6 +33,12 @@ import {
 import { estimateMessagesTokens } from './token-estimate';
 import { relayOutcome } from './relay-finalizer';
 import { summarizeUpstreamError, upstreamErrorCode } from './upstream-status-policy';
+import {
+  judgeModeration,
+  MODERATION_REJECTED_ERROR_CODE,
+  type ModerationProvider,
+  type ModerationVerdict,
+} from './ai-moderation';
 
 type Tier = 'FAST' | 'PREMIUM';
 type Kind = 'CHAT' | 'IMAGE';
@@ -96,6 +102,13 @@ export class RelayService {
     @Inject(ChannelRouterService) private readonly router: ChannelRouterService,
     @Inject(AuthService) private readonly auth: AuthService
   ) {}
+
+  /**
+   * P0-9 可插拔审核供应商。W0 决策前统一为 null（机制先行，不绑定具体供应商）。
+   * 供应商接入后由 RelayModule 注入具体实现；测试中可临时注入 mock 验证钩子行为。
+   * 注意：开关 `aiModerationEnabled` 为 OFF 时本字段不会被调用（judgeModeration 直接放行）。
+   */
+  moderationProvider: ModerationProvider | null = null;
 
   /** GET /api/relay/v1/models —— 返回当前团队实际可用的版本哨兵、资源池与 contextWindow。 */
   async listModels(req?: Request) {
@@ -315,6 +328,72 @@ export class RelayService {
     });
     const n = Number.parseInt((row?.value ?? '').trim(), 10);
     return Number.isFinite(n) && n > 0 ? n : VIDEO_MAX_SECONDS_DEFAULT;
+  }
+
+  /** 读 PlatformSetting.aiModerationEnabled（缺失/空/非法一律兜底 OFF——绝不默认 ON）。 */
+  private async readAiModerationEnabled(): Promise<boolean> {
+    const row = await this.prisma.platformSetting.findUnique({
+      where: { key: 'aiModerationEnabled' },
+      select: { value: true },
+    });
+    return (row?.value ?? '').trim().toLowerCase() === 'true';
+  }
+
+  /**
+   * P0-9 输出审核钩子：在 LLM 输出返回前端前（非流式路径）对完整文本做审核。
+   * 语义 fail-closed（见 ai-moderation.ts）：供应商不可用/超时 → 拒绝且留审计；
+   * 命中敏感内容 → 拒绝且留审计。被拒时抛 AppError(422)，阻断输出透传（不静默放行）。
+   *
+   * 调用方约束：仅非流式（stream=false）路径调用——流式内容在 relay 侧无完整文本，
+   * 流式审核需缓冲上游流（W0 后接入，属更大改动）。流式调用的 fail-closed 兜底由
+   * 前端渲染侧标识 + 后续服务端流式缓冲方案覆盖，本钩子不在流式路径静默放行任何内容。
+   *
+   * @returns 通过则 void；被拒则抛错（不返回）。
+   */
+  private async moderateOutput(
+    auth: { teamId: string; userId: string },
+    text: string
+  ): Promise<void> {
+    if (text.trim().length === 0) return; // 空输出无需审核
+    const enabled = await this.readAiModerationEnabled();
+    let verdict: ModerationVerdict;
+    try {
+      verdict = await judgeModeration(
+        { enabled, provider: this.moderationProvider },
+        text
+      );
+    } catch {
+      // judgeModeration 自身已吞掉供应商错误并返回明确 verdict，理论上不会到这；
+      // 极端防御：任何意外都按 fail-closed 拒绝。
+      verdict = { allowed: false, reason: 'moderation_unavailable', audit: true };
+    }
+    if (verdict.allowed) return;
+    // 被拒：落审计（复用 AuditLog），再抛错阻断输出。
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          actorUserId: auth.userId,
+          action: 'admin.llm.content_intercepted',
+          targetType: 'llm_output',
+          targetId: auth.teamId,
+          metadata: {
+            reason: verdict.reason,
+            enabled,
+            hasProvider: this.moderationProvider != null,
+          } as never,
+        },
+      });
+    } catch {
+      /* 审计写失败不阻断拒绝（拒绝优先级高于留痕） */
+    }
+    throw new AppError(
+      422,
+      MODERATION_REJECTED_ERROR_CODE,
+      verdict.reason === 'sensitive_content'
+        ? 'AI 生成内容未通过平台审核，已拦截（命中敏感内容）'
+        : 'AI 审核服务暂不可用，按平台安全策略拒绝本次输出',
+      { reason: verdict.reason }
+    );
   }
 
   /**
@@ -1141,6 +1220,27 @@ export class RelayService {
             routed.protocol,
             cand.model
           );
+          // P0-9 输出审核钩子：仅非流式路径对完整输出文本审核（流式内容 relay 侧无完整文本，W0 后接入缓冲）。
+          // 被拒（供应商不可用/命中敏感内容）按 fail-closed 抛错，阻断输出透传，且**不故障转移**到其它渠道
+          // （审核拒绝是终态，换渠道无意义），故单独 catch 后 finalize + 原样抛出终止循环。
+          // fr.text 缺省视为空（旧 forwarder / 图片转发无文本 → 不审核），避免 undefined.trim 抛错。
+          const outText = fr.text ?? '';
+          if (!plan.stream && outText.trim().length > 0) {
+            try {
+              await this.moderateOutput(auth, outText);
+            } catch (modErr) {
+              await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
+              await ensureFinalized({
+                status: 'client_error',
+                errorCode:
+                  modErr instanceof AppError ? modErr.code : 'content_moderation_rejected',
+                httpStatus: modErr instanceof AppError ? modErr.status : 422,
+                channelId: cand.id,
+                model: cand.model,
+              });
+              throw modErr; // 终止候选循环，直接返回审核拒绝错误给客户端
+            }
+          }
           // 计费：按命中 model 的单价。
           const usage = {
             inputTokens: fr.inputTokens,
@@ -1230,6 +1330,14 @@ export class RelayService {
       }
       // 全部候选失败：退款 + 终态 + 抛错。区分「全无定价」与「上游失败」。
       await this.credits.refund(auth.teamId, cap, pendingLog.id, auth.userId);
+      // P0-9 审核拒绝是终态（非故障转移）：已在候选循环内 finalize + 写审计，这里原样透传，
+      // 不套 upstream_error 外壳（否则 502 会误导客户端以为是上游故障）。
+      if (
+        lastError instanceof AppError &&
+        lastError.code === MODERATION_REJECTED_ERROR_CODE
+      ) {
+        throw lastError;
+      }
       if (lastError === undefined && skippedForNoPricing === candidates.length) {
         // 所有候选都因无定价被跳过：明确提示配价，而非笼统 upstream_error。
         const modelNames = Array.from(new Set(candidates.map((c) => c.model))).join('、');
